@@ -9,6 +9,7 @@ import {
   MacOsVoiceProvider,
   macOsSayAvailable,
 } from "./macos-voice.js";
+import { MiniMaxVoiceProvider } from "./minimax-voice.js";
 import { openAiCompatAllowPublicHosts } from "./openai-compatible-url.js";
 import {
   OPENAI_COMPATIBLE_VOICE_PROVIDER_ID,
@@ -44,6 +45,13 @@ export const VOICE_CATALOG = [
     transcribe: true,
     speechModel: true,
     languages: true,
+  },
+  {
+    id: "minimax",
+    name: "MiniMax",
+    description: "Multilingual speech and transcription.",
+    transcribe: true,
+    speechModel: true,
   },
   {
     id: OPENAI_COMPATIBLE_VOICE_PROVIDER_ID,
@@ -101,6 +109,8 @@ export function createVoiceProvider(
       return new OpenAIVoiceProvider();
     case "cartesia":
       return new CartesiaVoiceProvider();
+    case "minimax":
+      return new MiniMaxVoiceProvider();
     case "fish-audio":
       return new FishAudioVoiceProvider();
     case OPENAI_COMPATIBLE_VOICE_PROVIDER_ID:
@@ -117,7 +127,7 @@ export function createVoiceProvider(
       break;
   }
   throw new Error(
-    `Unknown voice provider "${kind}". Use elevenlabs | openai | cartesia | fish-audio | openai-compatible.`,
+    `Unknown voice provider "${kind}". Use elevenlabs | openai | cartesia | fish-audio | minimax | openai-compatible.`,
   );
 }
 

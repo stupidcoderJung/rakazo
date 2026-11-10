@@ -54,6 +54,7 @@ describe("createVoiceProvider", () => {
       "openai",
       "cartesia",
       "fish-audio",
+      "minimax",
       "openai-compatible",
     ]);
     expect(listVoiceCatalog().map((entry) => entry.id)).toEqual([
@@ -61,6 +62,7 @@ describe("createVoiceProvider", () => {
       "openai",
       "cartesia",
       "fish-audio",
+      "minimax",
     ]);
     expect(createVoiceProvider("elevenlabs").describe().id).toBe("elevenlabs");
     expect(createVoiceProvider("openai").describe().capabilities.transcribe).toBe(true);
