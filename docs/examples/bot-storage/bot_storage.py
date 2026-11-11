@@ -13,6 +13,11 @@ from urllib.parse import urlencode, urlsplit
 CHUNK = 256 * 1024
 
 
+class StorageHttpError(Exception):
+    def __init__(self, status):
+        self.status = status
+
+
 def main():
     parser = argparse.ArgumentParser(description='Transfer files to the bot workspace')
     sub = parser.add_subparsers(dest='op', required=True)
@@ -44,7 +49,7 @@ def main():
                 digest.update(chunk); conn.send(chunk)
         response = conn.getresponse()
         if response.status not in (200, 201):
-            raise RuntimeError('storage returned HTTP ' + str(response.status))
+            raise StorageHttpError(response.status)
         if args.op == 'download':
             dest = Path(args.local)
             if dest.exists():
@@ -83,6 +88,19 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except StorageHttpError as error:
+        hints = {
+            400: 'Invalid relative path or request.',
+            401: 'Ask the owner to check the Vault credential.',
+            403: 'Path is forbidden.',
+            404: 'Path does not exist. A new upload creates its parent directories.',
+            409: 'Destination exists. Choose a new filename; do not overwrite.',
+            413: 'File exceeds the upload limit.',
+            502: 'Storage unavailable. Check the destination before retrying an upload.',
+            503: 'Transfers are busy. Retry later.',
+        }
+        print('Transfer failed: HTTP ' + str(error.status) + '. ' + hints.get(error.status, 'Ask the owner to check the service.'))
+        raise SystemExit(1)
     except (OSError, ValueError, KeyError, RuntimeError, http.client.HTTPException) as error:
         # Avoid exception strings that could include configuration or response contents.
         print('Transfer failed (' + type(error).__name__ + '). Check credentials, destination, and service status.')

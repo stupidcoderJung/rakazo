@@ -132,5 +132,34 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(self.request('GET', 'empty'), (200, b''))
 
 
+class ClientErrorTests(unittest.TestCase):
+    def test_http_status_is_visible_without_credentials_or_response_body(self):
+        import contextlib
+        import io
+        import json
+        import os
+        from pathlib import Path
+        import runpy
+        from unittest.mock import MagicMock, patch
+
+        for status in (401, 404, 409, 413, 502):
+            connection = MagicMock()
+            connection.getresponse.return_value.status = status
+            output = io.StringIO()
+            config = json.dumps({'url': 'https://storage.example.test',
+                                 'token': 'private-sentinel', 'ca_pem': 'fake-ca'})
+            with self.subTest(status=status), patch.dict(os.environ, {'BOT_STORAGE_CONFIG': config}), \
+                 patch('sys.argv', ['bot_storage.py', 'list', 'new-folder']), \
+                 patch('ssl.create_default_context'), \
+                 patch('http.client.HTTPSConnection', return_value=connection), \
+                 contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as caught:
+                runpy.run_path(str(Path(__file__).with_name('bot_storage.py')), run_name='__main__')
+            self.assertEqual(caught.exception.code, 1)
+            self.assertIn('HTTP ' + str(status), output.getvalue())
+            self.assertNotIn('private-sentinel', output.getvalue())
+            connection.getresponse.return_value.read.assert_not_called()
+            connection.close.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()

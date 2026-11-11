@@ -109,7 +109,7 @@ The CLI never overwrites existing remote files or local downloads. Pick a new fi
 | HTTP 503 | All four transfer slots occupied; retry later |
 | Computer will not boot | Repair the existing computer/workspace problem before testing storage |
 
-The client intentionally prints generic errors instead of potentially sensitive exception text. The gateway does not log request headers, bodies or paths. Diagnose with synthetic files and a private operator session. Check gateway restarts, temporary disk pressure and HDFS capacity before increasing memory.
+The client prints HTTP status codes with fixed troubleshooting hints, and generic messages for other failures, instead of potentially sensitive exception text. A missing output directory (404) does not prevent an upload: the gateway creates its parent directories. The gateway does not log request headers, bodies or paths. Diagnose with synthetic files and a private operator session. Check gateway restarts, temporary disk pressure and HDFS capacity before increasing memory.
 
 Run the deterministic boundary tests locally:
 

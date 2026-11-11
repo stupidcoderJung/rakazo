@@ -17,42 +17,42 @@ Your job is to transfer files, verify the result, and return the storage path. F
 
 ## Step 1 — Prepare the client
 
-Run this entire block in a POSIX shell. Run it before transfers, even if the client already exists. It checks the credential's presence and the client checksum. It downloads the client only when needed. It never writes the credential to disk.
+Run this entire block in a POSIX shell. Use this quoted `python3 -c` form; the computer protection rules can reject interpreter heredocs. Run it before transfers, even if the client already exists. It checks the credential's presence and the client checksum. It downloads the client only when needed. It never writes the credential to disk.
 
 ```bash
-python3 - <<'PY'
+python3 -c '
 import hashlib, json, os, ssl, sys, urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-expected = 'aca7faae1b734fe1dec46812014804aedb555409f21ace70e7d40af73f123e27'
-client = Path('bot_storage.py')
-if not os.environ.get('BOT_STORAGE_CONFIG'):
-    sys.exit('STOP: BOT_STORAGE_CONFIG is missing. Ask the owner to configure the Vault Command credential.')
+expected = "2baed7acccf28c4db1f65d1e1a687764ee3398452b1b8861335f05152ad98f8d"
+client = Path("bot_storage.py")
+if not os.environ.get("BOT_STORAGE_CONFIG"):
+    sys.exit("STOP: BOT_STORAGE_CONFIG is missing. Ask the owner to configure the Vault Command credential.")
 try:
     if client.is_file() and hashlib.sha256(client.read_bytes()).hexdigest() == expected:
-        print('Client ready.')
+        print("Client ready.")
         sys.exit(0)
-    c = json.loads(os.environ['BOT_STORAGE_CONFIG'])
-    origin = urlsplit(c['url'])
-    if origin.scheme != 'https' or origin.username or origin.path not in ('', '/') or origin.query or origin.fragment:
-        raise ValueError('invalid origin')
+    c = json.loads(os.environ["BOT_STORAGE_CONFIG"])
+    origin = urlsplit(c["url"])
+    if origin.scheme != "https" or origin.username or origin.path not in ("", "/") or origin.query or origin.fragment:
+        raise ValueError("invalid origin")
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args):
-            raise RuntimeError('redirect refused')
+            raise RuntimeError("redirect refused")
     opener = urllib.request.build_opener(
-        urllib.request.HTTPSHandler(context=ssl.create_default_context(cadata=c['ca_pem'])), NoRedirect())
-    request = urllib.request.Request(c['url'].rstrip('/') + '/v1/client',
-                                     headers={'Authorization': 'Bearer ' + c['token']})
+        urllib.request.HTTPSHandler(context=ssl.create_default_context(cadata=c["ca_pem"])), NoRedirect())
+    request = urllib.request.Request(c["url"].rstrip("/") + "/v1/client",
+                                     headers={"Authorization": "Bearer " + c["token"]})
     with opener.open(request, timeout=30) as response:
         code = response.read(65537)
     if hashlib.sha256(code).hexdigest() != expected:
-        raise ValueError('checksum mismatch')
+        raise ValueError("checksum mismatch")
     client.write_bytes(code)
-    print('Client ready.')
+    print("Client ready.")
 except Exception:
-    sys.exit('STOP: Client preparation failed. Ask the owner to check the storage connection and Skill version. Do not print credentials or disable TLS.')
-PY
+    sys.exit("STOP: Client preparation failed. Ask the owner to check the storage connection and Skill version. Do not print credentials or disable TLS.")
+'
 ```
 
 Continue only if this command exits with code 0 and prints `Client ready.` If it fails, stop; do not invent replacement credentials or a different client. Importing a Skill does not itself install the client. This step also works after a computer is recreated.
@@ -69,7 +69,9 @@ Replace the example filenames below with the user's actual filenames. Keep quote
 python3 -c 'import os,sys; p=sys.argv[1]; n=os.path.getsize(p); print(n); sys.exit(0 if os.path.isfile(p) and n <= 536870912 else 1)' './report.pdf'
 ```
 
-2. Choose an unused remote name under `outputs/<project>/`. Use a new version or timestamp when a previous file may exist. Then run:
+2. A new upload automatically creates missing remote parent directories. You do not need to create them or successfully list them first. A listing returning HTTP 404 for a new output folder is expected; proceed with the upload.
+
+Choose an unused remote name under `outputs/<project>/`. Use a new version or timestamp when a previous file may exist. Then run:
 
 ```bash
 python3 bot_storage.py upload './report.pdf' 'outputs/study/report-v1.pdf'
@@ -96,7 +98,7 @@ python3 bot_storage.py list
 python3 bot_storage.py list 'outputs/study'
 ```
 
-Listing returns immediate children, not a recursive search. List a returned directory to look inside it. If the requested file is absent, say so; do not invent its contents or location.
+Listing returns immediate children, not a recursive search. List a returned directory to look inside it. If the requested input file is absent, say so; do not invent its contents or location. A missing output directory is different: upload can create it.
 
 ## Step 3 — Verify delivery
 
@@ -110,6 +112,7 @@ Only then report that the round trip was verified. A directory listing alone doe
 ## If a command fails
 
 - A nonzero exit code means failure. Do not claim success just because the command ran.
+- HTTP 404 on a new output directory is not a connection failure. Proceed with the intended upload; missing input files still cannot be downloaded.
 - If a destination already exists, choose a new name. There is no overwrite or delete command.
 - After an upload timeout or connection failure, first list the destination's parent directory. The upload may already have completed. If the file exists, download it to a new local name and compare its size and SHA-256 with the original before deciding whether delivery succeeded. If the original checksum was not recorded, calculate it locally with `sha256sum './report.pdf'`.
 - If the destination is absent and the failure was temporary, retry once. If that also fails, stop and tell the owner the operation and safe error message. Do not loop indefinitely.
