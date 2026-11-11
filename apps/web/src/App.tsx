@@ -72,6 +72,9 @@ const AdminPluginsPage = lazyComponent(() =>
 const AdminAccessPage = lazyComponent(() =>
   import("./pages/AdminAccessPage").then((module) => module.AdminAccessPage),
 );
+const ResourceSnapshotPage = lazyComponent(() =>
+  import("./pages/ResourceSnapshotPage").then((module) => module.ResourceSnapshotPage),
+);
 const NavLinkPage = lazyComponent(() =>
   import("./pages/NavLinkPage").then((module) => module.NavLinkPage),
 );
@@ -255,6 +258,16 @@ function SessionApp() {
                     <AdminPluginsPage />
                   ) : (
                     <Navigate to="/sign-in?next=/admin/plugins" replace />
+                  )
+                }
+              />
+              <Route
+                path="/operator/resources"
+                element={
+                  user ? (
+                    <ResourceSnapshotPage />
+                  ) : (
+                    <Navigate to="/sign-in?next=/operator/resources" replace />
                   )
                 }
               />

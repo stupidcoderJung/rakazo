@@ -1,7 +1,8 @@
 # Logs and monitoring
 
 Collect logs, errors, traces and product analytics, and alert on security events and host
-problems.
+problems. For an operator-owned, read-only resource snapshot and capacity plan, see
+[resource snapshots](./self-host-resource-report.md).
 
 ## Logging
 

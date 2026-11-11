@@ -21,3 +21,8 @@ it("starts a new account in onboarding unless it came for an invite", () => {
   expect(newAccountDestination("/integrations/setup")).toBe("/onboarding");
   expect(newAccountDestination(null)).toBe("/onboarding");
 });
+
+it("returns to the local resource snapshot screen after sign-in", () => {
+  expect(signInNext("/operator/resources")).toBe("/operator/resources");
+  expect(signInNext("/operator/resources?next=https://example.test")).toBeNull();
+});

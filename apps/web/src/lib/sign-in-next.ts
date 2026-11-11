@@ -11,6 +11,7 @@ export function signInNext(next: string | null): string | null {
     next === "/integrations/setup" ||
     next === "/admin/plugins" ||
     next === "/admin/access" ||
+    next === "/operator/resources" ||
     next.startsWith(`${MCP_OAUTH_CALLBACK_PATH}?`) ||
     next.startsWith(`${SLACK_INSTALL_CALLBACK_PATH}?`) ||
     INVITE_PATH.test(next)

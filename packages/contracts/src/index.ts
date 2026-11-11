@@ -39,6 +39,7 @@ export * from "./openai-compatible-ui.js";
 export * from "./pages.js";
 export * from "./payments.js";
 export * from "./reactions.js";
+export * from "./resource-snapshot.js";
 export * from "./routine-watch.js";
 export * from "./rpc.js";
 export * from "./runs.js";
