@@ -81,7 +81,7 @@ In Rakazo Vault, create a **Command** credential named `bot-storage-config`. Sec
 
 Use the account Vault for bots sharing that account. A Space with its own Vault needs its own entry. Command credentials are available to shell processes: Vault keeps them out of Skill text, but cannot make a credential unreadable to a bot allowed to execute code. Limit this credential to the intended bots' shared storage.
 
-Import `SKILL.md` into the applicable Skill catalog for each Space. The Skill bootstraps the small Python client from the authenticated gateway, checking its pinned SHA-256 before installing it. Importing a Skill alone does not execute scripts. If you modify the client, update both checksum occurrences in the Skill and the deployed ConfigMap.
+Import `SKILL.md` into the applicable Skill catalog for each Space. The Skill bootstraps the small Python client from the authenticated gateway, checking its pinned SHA-256 before installing it. Importing a Skill alone does not execute scripts. If you modify the client, update the pinned checksum in the Skill and the deployed ConfigMap.
 
 After registering the Vault value, securely remove temporary plaintext credential copies according to your operator policy. Back up credentials using your normal encrypted secret backup process.
 
