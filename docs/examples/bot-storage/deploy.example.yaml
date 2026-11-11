@@ -1,0 +1,176 @@
+# Review storage namespace, backend origins and labels before applying.
+# Requires bot-storage-code ConfigMap and bot-storage-tls Secret; see README.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot-storage
+  namespace: rakazo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: bot-storage
+  template:
+    metadata:
+      labels:
+        app: bot-storage
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+      containers:
+      - name: gateway
+        image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+        command:
+        - python3
+        - /app/gateway.py
+        env:
+        - name: CLIENT_FILE
+          value: /app/bot_storage.py
+        - name: WEBHDFS_ORIGIN
+          value: http://hdfs-namenode.storage.svc.cluster.local:9870
+        - name: WEBHDFS_DATA_ORIGINS
+          value: http://hdfs-datanode-0.hdfs-datanode.storage.svc.cluster.local:9864
+        - name: HDFS_ROOT
+          value: /bots/rakazo
+        - name: HDFS_USER
+          value: botfiles
+        - name: TOKEN_HASH_FILE
+          value: /credentials/token.sha256
+        - name: TLS_CERT_FILE
+          value: /credentials/tls.crt
+        - name: TLS_KEY_FILE
+          value: /credentials/tls.key
+        - name: MAX_FILE_BYTES
+          value: '536870912'
+        ports:
+        - containerPort: 8443
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+            ephemeral-storage: 128Mi
+          limits:
+            cpu: '2'
+            memory: 512Mi
+            ephemeral-storage: 3Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        readinessProbe:
+          tcpSocket:
+            port: 8443
+          periodSeconds: 5
+        volumeMounts:
+        - name: code
+          mountPath: /app
+          readOnly: true
+        - name: credentials
+          mountPath: /credentials
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: code
+        configMap:
+          name: bot-storage-code
+      - name: credentials
+        secret:
+          secretName: bot-storage-tls
+          defaultMode: 288
+      - name: tmp
+        emptyDir:
+          sizeLimit: 3Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bot-storage
+  namespace: rakazo
+spec:
+  selector:
+    app: bot-storage
+  ports:
+  - port: 8443
+    targetPort: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bot-storage
+  namespace: rakazo
+spec:
+  podSelector:
+    matchLabels:
+      app: bot-storage
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: rakazo-sandboxes
+    ports:
+    - port: 8443
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: storage
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: hdfs-namenode
+    ports:
+    - port: 9870
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: storage
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: hdfs-datanode
+    ports:
+    - port: 9864
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bot-storage-access
+  namespace: rakazo-sandboxes
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: rakazo
+      podSelector:
+        matchLabels:
+          app: bot-storage
+    ports:
+    - port: 8443
