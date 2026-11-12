@@ -1,4 +1,5 @@
 export const ZH_TW_MESSAGES: Record<string, string> = {
+  "Server setup required": "需要設定伺服器",
   Snooze: "暫緩",
   Snoozed: "已暫緩",
   Unsnooze: "取消暫緩",
