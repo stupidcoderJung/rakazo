@@ -517,6 +517,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["marketplace/catalog"],
       ["marketplace/review"],
       ["marketplace/submissions"],
+      ["mcp/apps/connect", { appId: "files" }],
       ["mcp/servers/list"],
       ["mcp/servers/create"],
       ["mcp/servers/update"],
