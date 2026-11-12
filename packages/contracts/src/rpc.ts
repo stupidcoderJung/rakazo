@@ -1134,7 +1134,9 @@ export const appContract = {
   },
   mcp: {
     apps: {
-      connect: oc.input(z.object({ appId: Id })).output(z.object({ serverId: Id })),
+      connect: oc
+        .input(z.object({ appId: Id, botId: Id.optional() }))
+        .output(z.object({ serverId: Id })),
     },
     servers: {
       list: oc.output(z.array(McpServerSchema)),
