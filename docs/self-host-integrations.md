@@ -149,11 +149,11 @@ redirect URI. If the app is in testing, add the connecting account as a test use
 [Google OAuth setup guide](https://developers.google.com/identity/protocols/oauth2/web-server)
 and [Drive scope guidance](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
 
-Set `DEPLOYMENT_APPS` on the API and worker to a JSON object containing the registered
+Set `DEPLOYMENT_APPS` on the API to a JSON object containing the registered
 client (supply real values through your deployment's secret manager, not a tracked file):
 
 ```json
-{"drive":{"clientId":"example-client","clientSecret":"example-secret"}}
+{ "drive": { "clientId": "example-client", "clientSecret": "example-secret" } }
 ```
 
 Users then open **Connect apps**, choose **Google Drive**, and approve Google's consent screen.

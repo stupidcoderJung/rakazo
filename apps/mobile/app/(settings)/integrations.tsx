@@ -14,7 +14,9 @@ import {
   CONNECTION_CATALOG_PAGE_SIZE,
   catalogItemAccounts,
   catalogItemKey,
+  catalogItemState,
   connectCatalogItem,
+  connectCatalogMcpApp,
   EMPTY_PLUGIN_CATALOG_MESSAGE,
   filterConnectionCatalogItems,
   integrationCatalogsReady,
@@ -678,28 +680,37 @@ export default function Integrations() {
   function openDetail(item: ConnectionCatalogItem) {
     if (item.mcpAppId) {
       const isCurrent = captureConnectionScope();
-      Alert.alert(item.name, undefined, [
-        { text: t("Cancel"), style: "cancel" },
-        { text: t("Connect"), onPress: () => isCurrent() && void connect(item) },
-        ...(item.mcpServerId
-          ? [
-              {
-                text: t("Disconnect"),
-                style: "destructive" as const,
-                onPress: () => {
-                  if (!isCurrent()) return;
-                  void rpc("mcp/servers/remove", { id: item.mcpServerId! })
-                    .then(async () => {
-                      if (isCurrent()) await refresh();
-                    })
-                    .catch((error) => {
-                      if (isCurrent()) setCatalogError(errorText(error, t("Could not disconnect")));
-                    });
+      Alert.alert(
+        item.name,
+        catalogItemState(item, itemConnected(item)) === "setup-required"
+          ? t("Server setup required")
+          : undefined,
+        [
+          { text: t("Cancel"), style: "cancel" },
+          ...(!item.needsSetup
+            ? [{ text: t("Connect"), onPress: () => isCurrent() && void connect(item) }]
+            : []),
+          ...(item.mcpServerId
+            ? [
+                {
+                  text: t("Disconnect"),
+                  style: "destructive" as const,
+                  onPress: () => {
+                    if (!isCurrent()) return;
+                    void rpc("mcp/servers/remove", { id: item.mcpServerId! })
+                      .then(async () => {
+                        if (isCurrent()) await refresh();
+                      })
+                      .catch((error) => {
+                        if (isCurrent())
+                          setCatalogError(errorText(error, t("Could not disconnect")));
+                      });
+                  },
                 },
-              },
-            ]
-          : []),
-      ]);
+              ]
+            : []),
+        ],
+      );
       return;
     }
     setCatalogError(null);
@@ -742,15 +753,21 @@ export default function Integrations() {
     setCatalogError(null);
     try {
       if (item.mcpAppId) {
-        const { serverId } = await rpc("mcp/apps/connect", { appId: item.mcpAppId });
-        if (!isCurrent() || controller.signal.aborted) return;
         const botId = lastBotId || (await loadLastBotId());
         if (!isCurrent() || controller.signal.aborted) return;
-        if (botId) await rpc("mcp/assignments/approve", { botId, serverId });
-        if (!isCurrent() || controller.signal.aborted) return;
-        setOauthServerId(serverId);
-        await authorizeMcp(serverId);
-        if (isCurrent()) await refresh();
+        await connectCatalogMcpApp(
+          { appId: item.mcpAppId, ...(botId ? { botId } : {}) },
+          {
+            connect: (input) => rpc("mcp/apps/connect", input),
+            authorize: async (serverId) => {
+              setOauthServerId(serverId);
+              await authorizeMcp(serverId);
+            },
+            refresh,
+            signal: controller.signal,
+            isCurrent,
+          },
+        );
         return;
       }
       const result = await connectCatalogItem(item, connections, {
@@ -954,10 +971,11 @@ export default function Integrations() {
 
   function renderCatalogActions(item: ConnectionCatalogItem, label: string) {
     const key = catalogItemKey(item);
-    const connected = itemConnected(item);
+    const state = catalogItemState(item, itemConnected(item));
     const connecting = pending === key;
-    if (item.needsSetup) return <Text style={styles.secondary}>{t("Server setup required")}</Text>;
-    if (connected) {
+    if (state === "setup-required")
+      return <Text style={styles.secondary}>{t("Server setup required")}</Text>;
+    if (state === "connected") {
       return (
         <NativeActionButton
           accessibilityLabel={t("Added")}
@@ -971,7 +989,9 @@ export default function Integrations() {
     }
     return (
       <NativeActionButton
-        accessibilityLabel={t("Add {name}", { name: label })}
+        accessibilityLabel={
+          item.mcpAppId ? t("Connect {name}", { name: label }) : t("Add {name}", { name: label })
+        }
         disabled={connecting}
         fill={false}
         label={connecting ? t("Working…") : item.mcpAppId ? t("Connect") : t("Add")}
