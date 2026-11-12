@@ -14,6 +14,7 @@ import {
   CONNECTION_CATALOG_PAGE_SIZE,
   catalogItemAccounts,
   catalogItemKey,
+  catalogItemState,
   connectCatalogItem,
   connectCatalogMcpApp,
   EMPTY_PLUGIN_CATALOG_MESSAGE,
@@ -679,28 +680,37 @@ export default function Integrations() {
   function openDetail(item: ConnectionCatalogItem) {
     if (item.mcpAppId) {
       const isCurrent = captureConnectionScope();
-      Alert.alert(item.name, undefined, [
-        { text: t("Cancel"), style: "cancel" },
-        { text: t("Connect"), onPress: () => isCurrent() && void connect(item) },
-        ...(item.mcpServerId
-          ? [
-              {
-                text: t("Disconnect"),
-                style: "destructive" as const,
-                onPress: () => {
-                  if (!isCurrent()) return;
-                  void rpc("mcp/servers/remove", { id: item.mcpServerId! })
-                    .then(async () => {
-                      if (isCurrent()) await refresh();
-                    })
-                    .catch((error) => {
-                      if (isCurrent()) setCatalogError(errorText(error, t("Could not disconnect")));
-                    });
+      Alert.alert(
+        item.name,
+        catalogItemState(item, itemConnected(item)) === "setup-required"
+          ? t("Server setup required")
+          : undefined,
+        [
+          { text: t("Cancel"), style: "cancel" },
+          ...(!item.needsSetup
+            ? [{ text: t("Connect"), onPress: () => isCurrent() && void connect(item) }]
+            : []),
+          ...(item.mcpServerId
+            ? [
+                {
+                  text: t("Disconnect"),
+                  style: "destructive" as const,
+                  onPress: () => {
+                    if (!isCurrent()) return;
+                    void rpc("mcp/servers/remove", { id: item.mcpServerId! })
+                      .then(async () => {
+                        if (isCurrent()) await refresh();
+                      })
+                      .catch((error) => {
+                        if (isCurrent())
+                          setCatalogError(errorText(error, t("Could not disconnect")));
+                      });
+                  },
                 },
-              },
-            ]
-          : []),
-      ]);
+              ]
+            : []),
+        ],
+      );
       return;
     }
     setCatalogError(null);
@@ -961,11 +971,11 @@ export default function Integrations() {
 
   function renderCatalogActions(item: ConnectionCatalogItem, label: string) {
     const key = catalogItemKey(item);
-    const connected = itemConnected(item);
+    const state = catalogItemState(item, itemConnected(item));
     const connecting = pending === key;
-    if (item.needsSetup && !connected)
+    if (state === "setup-required")
       return <Text style={styles.secondary}>{t("Server setup required")}</Text>;
-    if (connected) {
+    if (state === "connected") {
       return (
         <NativeActionButton
           accessibilityLabel={t("Added")}

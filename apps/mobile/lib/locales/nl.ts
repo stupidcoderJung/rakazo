@@ -1,4 +1,5 @@
 export const NL_MESSAGES: Record<string, string> = {
+  "Server setup required": "Serverconfiguratie vereist",
   Snooze: "Snoozen",
   Snoozed: "Gesnoozed",
   Unsnooze: "Niet meer snoozen",

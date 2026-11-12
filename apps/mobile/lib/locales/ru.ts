@@ -1,4 +1,5 @@
 export const RU_MESSAGES: Record<string, string> = {
+  "Server setup required": "Требуется настройка сервера",
   Snooze: "Отложить",
   Snoozed: "Отложенные",
   Unsnooze: "Вернуть",
