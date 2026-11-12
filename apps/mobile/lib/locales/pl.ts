@@ -1,4 +1,5 @@
 export const PL_MESSAGES: Record<string, string> = {
+  "Server setup required": "Wymagana konfiguracja serwera",
   Snooze: "Odłóż",
   Snoozed: "Odłożone",
   Unsnooze: "Przywróć",

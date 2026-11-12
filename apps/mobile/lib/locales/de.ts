@@ -1,4 +1,5 @@
 export const DE_MESSAGES: Record<string, string> = {
+  "Server setup required": "Servereinrichtung erforderlich",
   Snooze: "Schlummern",
   Snoozed: "Geschlummert",
   Unsnooze: "Nicht mehr schlummern",

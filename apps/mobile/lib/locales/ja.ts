@@ -1,4 +1,5 @@
 export const JA_MESSAGES: Record<string, string> = {
+  "Server setup required": "サーバーの設定が必要です",
   Snooze: "スヌーズ",
   Snoozed: "スヌーズ中",
   Unsnooze: "スヌーズを解除",
