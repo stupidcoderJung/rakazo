@@ -19,7 +19,6 @@ import {
   catalogItemState,
   connectCatalogItem,
   connectCatalogMcpApp,
-  EMPTY_PLUGIN_CATALOG_MESSAGE,
   filterConnectionCatalogItems,
   integrationCatalogsReady,
   isCatalogItemConnected,
