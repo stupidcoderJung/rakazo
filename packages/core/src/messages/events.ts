@@ -165,6 +165,9 @@ export function projectMessages(
   }
   for (const live of helpers) messages.push(live);
   for (const live of liveById.values()) {
+    // The snapshot's current state wins over incomplete or late event history.
+    const run = runs?.find((run) => run.id === live.meta.runId);
+    if (run && run.status !== "running" && run.status !== "leased") continue;
     if (live.blocks.length > 0) {
       messages.push({
         id: live.meta.id,

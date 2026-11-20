@@ -1,11 +1,12 @@
 import type { ConnectorCatalogItem } from "@rakazo/adapter-kit";
 import { planLiveConnectionSync } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
-import { availableChatApps, isAvailableChatApp } from "@rakazo/core";
+import { availableChatApps, filterConnectionCatalogItems, isAvailableChatApp } from "@rakazo/core";
 import type { Prisma } from "@rakazo/db";
 import { IsolationError, recordSecurityEvent } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { connectionCreatedEvent } from "../auth/security-audit.js";
+import { deploymentAppCatalog } from "../deployment-apps.js";
 import {
   beginConnection,
   completeConnection,
@@ -131,6 +132,13 @@ export function connectionsRoutes(ctx: RouterContext) {
               (provider): provider is NonNullable<typeof provider> => Boolean(provider),
             )
           : deps.connectors.managedProviders();
+        const bundledPromise =
+          !input.connectorId || input.connectorId === "deployment"
+            ? deploymentAppCatalog(ctx, context.actor).catch(() => {
+                getLogger().warn("Bundled app catalog is unavailable");
+                return [];
+              })
+            : Promise.resolve([]);
         const catalogs = await Promise.all(
           providers.map(async (provider): Promise<ConnectorCatalogItem[]> => {
             try {
@@ -163,9 +171,20 @@ export function connectionsRoutes(ctx: RouterContext) {
         const chatApps = deps.messaging?.enabled
           ? availableChatApps(deps.messaging.providers, Boolean(deps.messagingInstallations))
           : [];
-        return catalogs
-          .flat()
-          .map((item) => (isAvailableChatApp(item, chatApps) ? { ...item, chatApp: true } : item));
+        const bundled = await bundledPromise;
+        const managed = catalogs.flat();
+        const matches = input.query?.trim()
+          ? filterConnectionCatalogItems(bundled, input.query.trim())
+          : bundled;
+        return [
+          ...matches.filter(
+            (item) =>
+              !item.needsSetup ||
+              !!item.mcpServerId ||
+              !managed.some((other) => other.name.toLowerCase() === item.name.toLowerCase()),
+          ),
+          ...managed,
+        ].map((item) => (isAvailableChatApp(item, chatApps) ? { ...item, chatApp: true } : item));
       }),
       list: authed.connections.list.handler(async ({ context }) => {
         const rows = await deps.prisma.connection.findMany({

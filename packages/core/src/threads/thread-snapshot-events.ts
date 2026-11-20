@@ -289,6 +289,8 @@ function reduce(prev: LiveThreadSnapshot, event: ThreadSnapshotEvent): LiveThrea
   }
   if (event.type === "agent.tool.called" && !showsAsLiveStep(payload.name)) return advanced();
   if (event.type === "thread.progress" || event.type === "agent.tool.called") {
+    const run = activeThreadRuns(prev).find((run) => run.id === event.runId);
+    if (run?.status === "waiting_input" || run?.status === "waiting_takeover") return advanced();
     const liveId = progressMessageId(event);
     const { previous, remaining } = takeLiveMessage(prev.messages, liveId);
     const blocks = reduceLiveMessageBlocks(

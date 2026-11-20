@@ -72,6 +72,7 @@ export * from "./computers/screens/computer-screens.js";
 export * from "./computers/screens/computer-support.js";
 export { teamWorkspaceInstruction } from "./computers/screens/computer-support.prompt.js";
 export * from "./computers/screens/computer-tools.js";
+export * from "./deployment-apps.js";
 export * from "./email/email-emulator.js";
 export * from "./email/email-provider.js";
 export * from "./email/inbound-email.js";

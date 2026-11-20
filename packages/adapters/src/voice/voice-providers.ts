@@ -2,6 +2,7 @@ import { cartesiaVoice } from "../providers/voice/cartesia/cartesia-voice.js";
 import { elevenlabsVoice } from "../providers/voice/elevenlabs/elevenlabs-voice.js";
 import { fishAudioVoice } from "../providers/voice/fish-audio/fish-audio-voice.js";
 import { macOsVoice } from "../providers/voice/macos/macos-voice.js";
+import { minimaxVoice } from "../providers/voice/minimax/minimax-voice.js";
 import { openaiVoice } from "../providers/voice/openai/openai-voice.js";
 import { openAiCompatibleVoice } from "../providers/voice/openai-compatible/openai-compatible-voice.js";
 import { openRouterVoice } from "../providers/voice/openrouter/openrouter-voice.js";
@@ -18,6 +19,7 @@ export const voiceProviders = {
   elevenlabs: elevenlabsVoice,
   openai: openaiVoice,
   cartesia: cartesiaVoice,
+  minimax: minimaxVoice,
   "fish-audio": fishAudioVoice,
   xai: xaiVoice,
   openrouter: openRouterVoice,

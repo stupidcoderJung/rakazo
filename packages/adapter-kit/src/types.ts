@@ -690,6 +690,7 @@ export interface AgentRunRequest {
   verbatimMcpServers?: { ids: readonly string[]; slugs: readonly string[] };
   /** Exclusive workflow cost bucket; retrieval tool turns are detected for answer calls. */
   usageOperationKind?: UsageOperationKind;
+  inRunCheckpoint?: "auto" | "off";
   botId: string;
   threadId: string;
   runId: string;

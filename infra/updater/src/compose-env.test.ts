@@ -44,6 +44,7 @@ const KUBERNETES_SANDBOX =
 const LOCAL_VM = "Mac VM computers, which only the desktop app's native stack runs";
 const NOT_PASSED: Record<string, string> = {
   VITEST: "set by the test runner",
+  ACCESS_TOKEN: "injected into an isolated connector process from the per-user OAuth grant",
   OWNER_EMAIL: "bootstrap-owner CLI input, passed on its own command line",
   OWNER_PASSWORD: "bootstrap-owner CLI input, passed on its own command line",
   DEMO_ACCOUNT_EMAIL: "publishes a shared login; only throwaway pull request previews set it",

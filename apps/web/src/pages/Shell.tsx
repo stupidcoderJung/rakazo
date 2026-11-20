@@ -21,6 +21,8 @@ import {
   isRunWorking,
   newClientId,
   otherAuthor,
+  pendingInputMessages,
+  withoutPendingInputs,
   workingRoutineName,
 } from "@rakazo/core";
 import type { GroupAvatarMember } from "@rakazo/ui-web";
@@ -41,6 +43,7 @@ import { useParams } from "react-router-dom";
 import { CallCard, CallReturnBar } from "../components/call/CallCard";
 import { IncomingCall } from "../components/call/IncomingCall";
 import { ComputerUpdateProgress } from "../components/computers/ComputerUpdateProgress";
+import { PendingInputRequests } from "../components/messages/PendingInputRequests";
 import { PageLoading } from "../components/PageLoading";
 import { PageViewHost } from "../components/pages/PageViewHost";
 import { authClient } from "../lib/auth/auth";
@@ -631,9 +634,16 @@ function SpaceShell() {
   const workingRuns = currentRuns.filter((run) => isRunWorking(run.status));
   const transcriptRunning = workingRuns.length > 0;
   const composerRunning = currentRuns.some((run) => isActive(run.status));
+  const pendingInputs = useMemo(
+    () => pendingInputMessages(activeSnapshot, userId),
+    [activeSnapshot, userId],
+  );
   const transcript = useMemo(
-    () => foldPeerReplies(activeSnapshot?.messages ?? [], { includePeerReceipts: true }),
-    [activeSnapshot?.messages],
+    () =>
+      foldPeerReplies(withoutPendingInputs(activeSnapshot?.messages ?? [], pendingInputs), {
+        includePeerReceipts: true,
+      }),
+    [activeSnapshot?.messages, pendingInputs],
   );
   const transcriptArtifactTarget = useMemo<ArtifactTarget>(
     () => (inGroup ? { groupId: groupId ?? "" } : { botId: active?.id ?? "" }),
@@ -1228,6 +1238,11 @@ function SpaceShell() {
                 <Trans>Teaching in progress. Stop teaching before sending a new message.</Trans>
               </div>
             ) : null}
+            <PendingInputRequests
+              messages={pendingInputs}
+              onAnswer={composer.answerMessage}
+              rpc={rpc}
+            />
             <Composer
               key={inGroup ? `group:${groupId}` : `bot:${active?.id}`}
               draftKey={inGroup ? `group:${groupId}` : `bot:${active?.id}`}

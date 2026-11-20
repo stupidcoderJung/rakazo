@@ -24,6 +24,7 @@ import {
   messageReaction,
   resolveAskChoice,
   SITE_SENDING_TOOLS,
+  samePendingSecretRequest,
 } from "@rakazo/core";
 import { urlSite } from "@rakazo/core/egress";
 import { approvalEffectKey } from "@rakazo/core/node/approval-effect-key";
@@ -53,6 +54,10 @@ export class AnswerTooLongError extends Error {
     super("This answer is too long.");
     this.name = "AnswerTooLongError";
   }
+}
+
+export interface PauseRunForInputResult extends FinalizeRunResult {
+  existingRequest?: { messageId: string; runId: string };
 }
 
 export interface PauseRunForInput {
@@ -762,12 +767,57 @@ export async function pauseRunForInput(
   prisma: PrismaClient,
   input: PauseRunForInput,
   realtime?: RealtimeFanout,
-): Promise<FinalizeRunResult | false> {
+): Promise<PauseRunForInputResult | false> {
   const requestThreadId = input.requestThreadId ?? input.threadId;
   const committed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
     // concurrent clear cannot deadlock against this transaction.
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${requestThreadId} FOR UPDATE`;
+    // Serialize detection and creation with the same lock used by answers. A second run
+    // returns the existing request to its model instead of creating another paused run.
+    const ask = input.blocks.length === 1 ? input.blocks[0] : undefined;
+    if (
+      !input.requestThreadId &&
+      ask?.kind === "ask" &&
+      ask.input === "secret" &&
+      ask.credential &&
+      !ask.oneTimeCode
+    ) {
+      const current = await tx.run.findFirst({
+        where: {
+          id: input.runId,
+          spaceId: input.spaceId,
+          threadId: input.threadId,
+          botId: input.botId,
+          status: "running",
+          leaseOwner: input.leaseOwner,
+          leaseFence: input.leaseFence,
+        },
+        select: { userId: true },
+      });
+      if (!current) return null;
+      const waiting = await tx.run.findMany({
+        where: {
+          spaceId: input.spaceId,
+          threadId: input.threadId,
+          botId: input.botId,
+          userId: current.userId,
+          status: "waiting_input",
+          id: { not: input.runId },
+        },
+        select: { id: true },
+        orderBy: { createdAt: "asc" },
+      });
+      for (const run of waiting) {
+        const existing = await findPendingAsk(tx, { threadId: input.threadId, runId: run.id });
+        if (existing && samePendingSecretRequest(existing.pendingAsk, ask)) {
+          return {
+            existingRequest: { messageId: existing.messageId, runId: run.id },
+            continuationRunId: null,
+          };
+        }
+      }
+    }
     const paused = await tx.run.updateMany({
       where: {
         id: input.runId,
@@ -858,6 +908,7 @@ export async function pauseRunForInput(
   }, THREAD_LOCK_TRANSACTION_OPTIONS);
 
   if (!committed) return false;
+  if ("existingRequest" in committed) return committed;
   await notifyCommittedEvent(
     prisma,
     realtime,

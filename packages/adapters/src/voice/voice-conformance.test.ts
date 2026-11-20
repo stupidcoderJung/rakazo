@@ -7,6 +7,7 @@ import { ElevenLabsVoiceProvider } from "../providers/voice/elevenlabs/elevenlab
 import { FishAudioVoiceProvider } from "../providers/voice/fish-audio/fish-audio-voice.js";
 import type { SayRunner } from "../providers/voice/macos/macos-voice.js";
 import { MacOsVoiceProvider } from "../providers/voice/macos/macos-voice.js";
+import { MiniMaxVoiceProvider } from "../providers/voice/minimax/minimax-voice.js";
 import { OpenAIVoiceProvider } from "../providers/voice/openai/openai-voice.js";
 import {
   OpenAiCompatibleVoiceProvider,
@@ -149,6 +150,27 @@ const fixtures: Record<VoiceProviderId, VoiceConformanceFixture> = {
       "POST https://api.openai.com/v1/audio/transcriptions": {
         answer: transcript,
         form: ["model", "file"],
+      },
+    },
+  },
+  minimax: {
+    provider: () => new MiniMaxVoiceProvider(),
+    apiKey: TEST_KEY,
+    auth: bearer,
+    routes: {
+      "POST https://api.minimax.io/v1/get_voice": () =>
+        Response.json({
+          base_resp: { status_code: 0 },
+          system_voice: [{ voice_id: "voice-1", voice_name: "Fixture" }],
+        }),
+      "POST https://api.minimax.io/v1/t2a_v2": () =>
+        Response.json({
+          base_resp: { status_code: 0 },
+          data: { audio: Buffer.from(MPEG).toString("hex") },
+        }),
+      "POST https://api.minimax.io/v1/speech_to_text": {
+        answer: transcript,
+        form: ["file", "model"],
       },
     },
   },

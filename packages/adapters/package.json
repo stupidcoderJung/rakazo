@@ -4,6 +4,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
+    "./google-drive-mcp": "./src/google-drive-mcp.ts",
     ".": "./src/index.ts",
     "./agent-desktop-host-screen": "./src/computers/screens/agent-desktop-host-screen.ts",
     "./cua-host-screen": "./src/computers/screens/cua-host-screen.ts",

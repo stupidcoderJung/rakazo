@@ -103,6 +103,48 @@ export async function loadMessagePage(
   }
 }
 
+/** Keep an unanswered request reachable even after it has left the recent history page. */
+export async function includePendingInputs(
+  prisma: MessageDb,
+  page: ThreadMessagePage,
+  runs: readonly { id: string; status: string }[],
+): Promise<void> {
+  const missing = runs.filter(
+    (run) =>
+      run.status === "waiting_input" &&
+      !page.messages.some(
+        (message) =>
+          message.runId === run.id &&
+          message.blocks.some((block) => block.kind === "ask" && block.status !== "answered"),
+      ),
+  );
+  if (!missing.length) return;
+  // Pausing writes the ask as the run's last bot message under the thread lock.
+  const rows = await Promise.all(
+    missing.map((run) =>
+      prisma.message.findFirst({
+        where: { threadId: page.threadId, role: "bot", runId: run.id },
+        orderBy: { seq: "desc" },
+        include: { replyTo: { select: replySelection } },
+      }),
+    ),
+  );
+  const pending = (
+    await toThreadMessages(
+      prisma,
+      rows.filter((row) => row !== null),
+    )
+  ).filter((message) =>
+    message.blocks.some((block) => block.kind === "ask" && block.status !== "answered"),
+  );
+  const ids = new Set(page.messages.map((message) => message.id));
+  page.messages = [...pending.filter((message) => !ids.has(message.id)), ...page.messages].sort(
+    (a, b) => (a.seq ?? 0) - (b.seq ?? 0),
+  );
+  // Keep the original cursor: an isolated pending card does not mean history between it
+  // and the recent page has been loaded.
+}
+
 export async function loadAllMessages(
   prisma: PrismaClient,
   threadId: string,

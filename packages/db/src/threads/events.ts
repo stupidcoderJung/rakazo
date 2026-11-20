@@ -69,7 +69,12 @@ import {
   partialReplyClientNonce,
   RunHistoryWriteError,
 } from "./messages.js";
-import type { AnswerRunInput, PauseRunForInput, RunSecretWriter } from "./thread-ask.js";
+import type {
+  AnswerRunInput,
+  PauseRunForInput,
+  PauseRunForInputResult,
+  RunSecretWriter,
+} from "./thread-ask.js";
 import { answerRunInput, pauseRunForInput } from "./thread-ask.js";
 import { clearThreadReads } from "./thread-reads.js";
 import type { ClaimedSteeringMessage, ClaimSteeringInput } from "./thread-steering.js";
@@ -144,7 +149,7 @@ export interface ThreadEvents {
   finalizeRun(input: FinalizeRunInput): Promise<FinalizeRunResult | false>;
   releaseUserControl(input: ReleaseUserControlInput): Promise<boolean>;
   notify(threadId: string, seq: number, firstResponseRunId?: string): Promise<void>;
-  pauseRunForInput(input: PauseRunForInput): Promise<FinalizeRunResult | false>;
+  pauseRunForInput(input: PauseRunForInput): Promise<PauseRunForInputResult | false>;
   pauseRunForTakeover(input: PauseRunForTakeover): Promise<boolean | { continuationRunId: string }>;
   sendUserMessage(input: SendUserMessageInput): Promise<SendUserMessageResult>;
   follow(threadId: string, cursor: number, signal?: AbortSignal): AsyncGenerator<ProductEvent>;

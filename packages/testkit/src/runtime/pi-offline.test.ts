@@ -152,6 +152,7 @@ describe("real Pi against an offline model HTTP endpoint", () => {
             { ...server.model, contextWindow: 8192, maxTokens: 1024 },
             {
               contextStrategy,
+              inRunCheckpoint: "off",
               history: Array.from({ length: 100 }, (_, index) => ({
                 id: `old-${index}`,
                 role: "user" as const,

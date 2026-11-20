@@ -148,6 +148,7 @@ describe("structured results through real Pi context selection", () => {
           prompt: "Approval remains pending. Follow all diagnostic cursors. Do not deploy.",
           instructions:
             "Use read-only diagnostic evidence and preserve the current approval state.",
+          inRunCheckpoint: "off",
           history: Array.from({ length: 100 }, (_, index) => ({
             id: `old-${index}`,
             role: "user" as const,

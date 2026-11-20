@@ -10,7 +10,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { botRunStatuses, spaceIsShared } from "@rakazo/db";
 import { resolveComputerWork, toComputerStatus } from "../computers/computer-status.js";
 import { THREAD_MESSAGE_PAGE_SIZE } from "../routes/shared.js";
-import { loadMessagePage } from "./thread-message-pages.js";
+import { includePendingInputs, loadMessagePage } from "./thread-message-pages.js";
 import type { ThreadTarget } from "./thread-target.js";
 
 export async function threadSnapshot(
@@ -80,6 +80,7 @@ export async function threadSnapshot(
               botName: target.bot.name,
             }),
           ]);
+        await includePendingInputs(tx, messagePage, activeRuns);
         const run = pickPrimaryPrivateActiveRun(activeRuns) ?? busyOrFailed;
         // A failure only surfaces while it is still the newest terminal run, or a stale
         // failure would reappear on every load. Compare by ordering, not timestamps:
@@ -193,6 +194,7 @@ export async function threadSnapshot(
         }),
         botRunStatuses(tx, target.memberBotIds),
       ]);
+      await includePendingInputs(tx, messagePage, activeRuns);
       const liveEvents =
         activeRuns.length > 0
           ? await tx.event.findMany({

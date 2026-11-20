@@ -77,6 +77,7 @@ export interface AppEnv extends MessagingEnvironmentValues {
   signupAllowlist: string | undefined;
   encryptionKey: string;
   contentEncryption: boolean;
+  deploymentApps?: string;
   dataDir: string;
   /** Opt-in Pi JSONL session recording under DATA_DIR/pi-sessions. Default off. */
   piSessionRecording: boolean;
@@ -282,6 +283,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     signupAllowlist: source.SIGNUP_ALLOWLIST,
     encryptionKey: resolveEncryptionKey(source),
     contentEncryption: resolveContentEncryption(source),
+    deploymentApps: source.DEPLOYMENT_APPS,
     dataDir: source.DATA_DIR ?? "./data",
     piSessionRecording: source.PI_SESSION_RECORDING === "true",
     deploymentLabs: deploymentLabsFromEnv(source),

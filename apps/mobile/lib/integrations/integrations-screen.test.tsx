@@ -13,6 +13,8 @@ import { queryClient } from "../query/query";
 
 const state = vi.hoisted(() => ({
   rpc: vi.fn(),
+  lastBot: vi.fn(),
+  clearLastBot: vi.fn(),
   marketplace: vi.fn(),
   push: vi.fn(),
   read: vi.fn(),
@@ -60,7 +62,10 @@ vi.mock("./integrations-cache", () => ({
   readIntegrationsCache: state.read,
   writeIntegrationsCache: state.write,
 }));
-vi.mock("../inbox/last-bot", () => ({ loadLastBotId: async () => "" }));
+vi.mock("../inbox/last-bot", () => ({
+  loadLastBotId: state.lastBot,
+  clearLastBot: state.clearLastBot,
+}));
 vi.mock("../appearance/appearance", () => ({
   mobileTokens: () => ({ destructive: "red", success: "green", warning: "orange" }),
 }));
@@ -237,6 +242,8 @@ let container: HTMLDivElement;
 let catalog: Deferred<(typeof item)[]>;
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  state.lastBot.mockReset().mockResolvedValue("");
+  state.clearLastBot.mockReset().mockResolvedValue(undefined);
   state.current = true;
   state.focused = true;
   state.authSession.mockReset().mockResolvedValue({ type: "cancel" });
@@ -1535,4 +1542,75 @@ it("does not say nothing matched when the screen lists a match but the catalog f
 
   expect(container.textContent).toContain("Example app");
   expect(container.textContent).not.toContain("No apps match your search.");
+});
+
+it("connects a bundled app without assignment when its remembered bot was deleted", async () => {
+  state.lastBot.mockResolvedValue("deleted-bot");
+  const fallback = state.rpc.getMockImplementation();
+  state.rpc.mockImplementation((proc: string, input: { botId?: string }) => {
+    if (proc === "mcp/apps/connect")
+      return input.botId
+        ? Promise.reject(Object.assign(new Error("missing"), { code: "NOT_FOUND" }))
+        : Promise.resolve({ serverId: "new-server" });
+    if (proc === "mcp/oauth/begin")
+      return Promise.resolve({
+        status: "authorization_required",
+        authorizationUrl: "https://identity.example.test/authorize",
+      });
+    return fallback?.(proc, input);
+  });
+  await render();
+  await act(async () =>
+    catalog.resolve([
+      {
+        ...item,
+        connectorId: "deployment",
+        slug: "files",
+        connected: false,
+        mcpAppId: "files",
+      } as typeof item,
+    ]),
+  );
+  await act(async () =>
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Connect")
+      ?.click(),
+  );
+  expect(
+    state.rpc.mock.calls.filter(([proc]) => proc === "mcp/apps/connect").map(([, input]) => input),
+  ).toEqual([{ appId: "files", botId: "deleted-bot" }, { appId: "files" }]);
+  expect(state.clearLastBot).toHaveBeenCalledOnce();
+  expect(state.rpc).toHaveBeenCalledWith("mcp/oauth/begin", {
+    serverId: "new-server",
+    client: "mobile",
+  });
+});
+
+it("retains a bundled authorization error without refreshing it away", async () => {
+  const fallback = state.rpc.getMockImplementation();
+  state.rpc.mockImplementation((proc: string, input: unknown) => {
+    if (proc === "mcp/apps/connect") return Promise.resolve({ serverId: "new-server" });
+    if (proc === "mcp/oauth/begin") return Promise.reject(new Error("Authorization unavailable"));
+    return fallback?.(proc, input);
+  });
+  await render();
+  await act(async () =>
+    catalog.resolve([
+      {
+        ...item,
+        connectorId: "deployment",
+        slug: "files",
+        connected: false,
+        mcpAppId: "files",
+      } as typeof item,
+    ]),
+  );
+  const reads = state.rpc.mock.calls.filter(([proc]) => proc === "mcp/servers/list").length;
+  await act(async () =>
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Connect")
+      ?.click(),
+  );
+  expect(container.textContent).toContain("Authorization unavailable");
+  expect(state.rpc.mock.calls.filter(([proc]) => proc === "mcp/servers/list")).toHaveLength(reads);
 });

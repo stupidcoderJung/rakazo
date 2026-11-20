@@ -417,6 +417,16 @@ export const secretTools: ToolHandlers = {
     if (!paused) {
       throw new Error("Could not pause this run for protected input; try sending again.");
     }
+    if (paused.existingRequest) {
+      // This lookup is deferred, not completed. Keep the effect intended so a later call
+      // in this run can observe a credential supplied through the original request.
+      return {
+        pending: true,
+        ...paused.existingRequest,
+        instruction:
+          "The same protected input is already requested in this chat. Direct the user to that existing request. Do not ask again or claim the input was supplied. Continue only work that does not need it.",
+      };
+    }
     await enqueueSteeringContinuation(deps, paused.continuationRunId);
     await reportBotMessageWait(deps, run, bot, redactSecrets(askText, ctx.secrets), ctx.attempt.id);
     await notifyRun(deps, run, {

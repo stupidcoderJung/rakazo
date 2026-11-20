@@ -16,7 +16,9 @@ import {
   CONNECTION_CATALOG_PAGE_SIZE,
   catalogItemAccounts,
   catalogItemKey,
+  catalogItemState,
   connectCatalogItem,
+  connectCatalogMcpApp,
   customMcpServerInput,
   filterConnectionCatalogItems,
   integrationCatalogsReady,
@@ -62,7 +64,7 @@ import { Chevron } from "../../components/ui/row-accessories";
 import { rpc } from "../../lib/api/api";
 import { errorText } from "../../lib/api/user-error";
 import { mobileTokens } from "../../lib/appearance/appearance";
-import { loadLastBotId } from "../../lib/inbox/last-bot";
+import { clearLastBot, loadLastBotId } from "../../lib/inbox/last-bot";
 import type {
   IntegrationsCacheScope,
   IntegrationsSnapshot,
@@ -679,6 +681,40 @@ export default function Integrations() {
   }
 
   function openDetail(item: ConnectionCatalogItem) {
+    if (item.mcpAppId) {
+      const isCurrent = captureConnectionScope();
+      Alert.alert(
+        item.name,
+        catalogItemState(item, itemConnected(item)) === "setup-required"
+          ? t`Server setup required`
+          : undefined,
+        [
+          { text: t`Cancel`, style: "cancel" },
+          ...(!item.needsSetup
+            ? [{ text: t`Connect`, onPress: () => isCurrent() && void connect(item) }]
+            : []),
+          ...(item.mcpServerId
+            ? [
+                {
+                  text: t`Disconnect`,
+                  style: "destructive" as const,
+                  onPress: () => {
+                    if (!isCurrent()) return;
+                    void rpc("mcp/servers/remove", { id: item.mcpServerId! })
+                      .then(async () => {
+                        if (isCurrent()) await refresh();
+                      })
+                      .catch((error) => {
+                        if (isCurrent()) setCatalogError(errorText(error, t`Could not disconnect`));
+                      });
+                  },
+                },
+              ]
+            : []),
+        ],
+      );
+      return;
+    }
     setCatalogError(null);
     setToolsOpen(true);
     setDetailKey({ connectorId: item.connectorId, slug: item.slug });
@@ -718,6 +754,40 @@ export default function Integrations() {
     setPending(key);
     setCatalogError(null);
     try {
+      if (item.mcpAppId) {
+        const botId = lastBotId || (await loadLastBotId());
+        if (!isCurrent() || controller.signal.aborted) return;
+        await connectCatalogMcpApp(
+          { appId: item.mcpAppId, ...(botId ? { botId } : {}) },
+          {
+            connect: async (input) => {
+              try {
+                return await rpc("mcp/apps/connect", input);
+              } catch (reason) {
+                if (
+                  !input.botId ||
+                  (reason as { code?: string })?.code !== "NOT_FOUND" ||
+                  !isCurrent() ||
+                  controller.signal.aborted
+                )
+                  throw reason;
+                // The remembered bot is optional context and may have been deleted.
+                setLastBotId("");
+                void clearLastBot();
+                return rpc("mcp/apps/connect", { appId: input.appId });
+              }
+            },
+            authorize: async (serverId) => {
+              setOauthServerId(serverId);
+              await authorizeMcp(serverId, true);
+            },
+            refresh,
+            signal: controller.signal,
+            isCurrent,
+          },
+        );
+        return;
+      }
       const result = await connectCatalogItem(item, connections, {
         begin: (input) => rpc("connections/begin", input),
         complete: (input) => rpc("connections/complete", input),
@@ -830,7 +900,7 @@ export default function Integrations() {
     setAuthHeader("x-api-key");
   }
 
-  async function authorizeMcp(serverId: string) {
+  async function authorizeMcp(serverId: string, propagateError = false) {
     const isCurrent = captureConnectionScope();
     if (!isCurrent()) return;
     setPending(`oauth:${serverId}`);
@@ -840,6 +910,7 @@ export default function Integrations() {
       if (isCurrent()) await retryRefresh(isCurrent);
     } catch (reason) {
       if (isCurrent()) setMcpError(errorText(reason, t`Could not start MCP OAuth`));
+      if (propagateError) throw reason;
     } finally {
       if (isCurrent()) setPending(null);
     }
@@ -907,9 +978,11 @@ export default function Integrations() {
 
   function renderCatalogActions(item: ConnectionCatalogItem, label: string) {
     const key = catalogItemKey(item);
-    const connected = itemConnected(item);
+    const state = catalogItemState(item, itemConnected(item));
     const connecting = pending === key;
-    if (connected) {
+    if (state === "setup-required")
+      return <Text style={styles.secondary}>{t`Server setup required`}</Text>;
+    if (state === "connected") {
       return (
         <NativeActionButton
           accessibilityLabel={t`Added`}
@@ -923,10 +996,12 @@ export default function Integrations() {
     }
     return (
       <NativeActionButton
-        accessibilityLabel={t`Add ${ph({ name: label })}`}
+        accessibilityLabel={
+          item.mcpAppId ? t`Connect ${ph({ name: label })}` : t`Add ${ph({ name: label })}`
+        }
         disabled={connecting}
         fill={false}
-        label={connecting ? t`Working…` : t`Add`}
+        label={connecting ? t`Working…` : item.mcpAppId ? t`Connect` : t`Add`}
         onPress={() => void connect(item)}
         prominence="secondary"
       />

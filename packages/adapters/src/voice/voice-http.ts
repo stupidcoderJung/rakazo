@@ -65,13 +65,19 @@ export async function readVoiceText(res: Response): Promise<string | null> {
 
 export async function readVoiceJson(
   res: Response,
-  options: { requireValid?: boolean; rawOnInvalid?: boolean } = {},
+  options: {
+    requireValid?: boolean;
+    rawOnInvalid?: boolean;
+    maxBytes?: number;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<unknown> {
   let bytes: Uint8Array;
   try {
-    bytes = await readVoiceBytes(res, MAX_VOICE_JSON_BYTES);
+    bytes = await readVoiceBytes(res, options.maxBytes ?? MAX_VOICE_JSON_BYTES, options.signal);
   } catch (error) {
     if (error instanceof ResponseTooLargeError) throw error;
+    options.signal?.throwIfAborted();
     if (options.requireValid) throw new Error("Voice provider response could not be read.");
     return null;
   }

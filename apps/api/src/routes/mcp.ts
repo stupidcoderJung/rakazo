@@ -18,6 +18,7 @@ import {
   itemSecretIn,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { connectDeploymentApp } from "../deployment-apps.js";
 import {
   queueMcpConnectedRun,
   resolveMcpApprovalCards,
@@ -152,6 +153,11 @@ export function mcpRoutes(ctx: RouterContext) {
 
   return {
     mcp: {
+      apps: {
+        connect: authed.mcp.apps.connect.handler(({ context, input }) =>
+          connectDeploymentApp(ctx, context.actor, input.appId, input.botId),
+        ),
+      },
       servers: {
         list: authed.mcp.servers.list.handler(async ({ context }) => {
           const rows = await deps.prisma.mcpServer.findMany({

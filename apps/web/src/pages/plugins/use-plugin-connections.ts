@@ -9,12 +9,14 @@ import {
   catalogItemAccounts,
   catalogItemKey,
   connectCatalogItem,
+  connectCatalogMcpApp,
   connectedAppMarks,
   isCatalogItemConnected,
 } from "@rakazo/core";
 import { fetchFresh, writeSaved } from "@rakazo/core/query";
 import { queryOptions, skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { connectMcpOauth } from "../../lib/integrations/mcp-connect";
 import { optionalCatalogFeedProbe } from "../../lib/integrations/optional-catalog-feed";
 import { useSpaceQueries } from "../../lib/query/query";
 import { rpc } from "../../lib/query/rpc";
@@ -197,6 +199,18 @@ export function usePluginConnections({
     const key = catalogItemKey(item);
     setPending(key);
     try {
+      if (item.mcpAppId) {
+        await connectCatalogMcpApp(
+          { appId: item.mcpAppId, ...(activeBotId ? { botId: activeBotId } : {}) },
+          {
+            connect: (input) => rpc.mcp.apps.connect(input),
+            authorize: connectMcpOauth,
+            refresh,
+            signal: controller.signal,
+          },
+        );
+        return;
+      }
       const result = await connectCatalogItem(item, connections, {
         begin: (input) => rpc.connections.begin(input),
         complete: (input) => rpc.connections.complete(input),
