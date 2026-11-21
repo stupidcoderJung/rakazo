@@ -11,9 +11,11 @@ test("asks before using an app on the user's computer", async ({ page }, testInf
   await page.keyboard.press("Enter");
 
   const transcript = page.getByTestId("transcript");
-  await expect(transcript.getByText("Use TextEdit on your computer?", { exact: true })).toBeVisible(
-    { timeout: 60_000 },
-  );
+  await expect(
+    page
+      .getByTestId("pending-input-requests")
+      .getByText("Use TextEdit on your computer?", { exact: true }),
+  ).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("button", { name: "Deny", exact: true })).toBeVisible();
   await captureScreenshot(page, testInfo, "user-computer-screen-approval-card");
 

@@ -11,7 +11,9 @@ test("asks before running a command on the user's computer", async ({ page }, te
   await page.keyboard.press("Enter");
 
   const transcript = page.getByTestId("transcript");
-  await expect(transcript.getByText("Run on your computer?", { exact: true })).toBeVisible({
+  await expect(
+    page.getByTestId("pending-input-requests").getByText("Run on your computer?", { exact: true }),
+  ).toBeVisible({
     timeout: 60_000,
   });
   const allow = page.getByRole("button", { name: "Allow in this space", exact: true });
