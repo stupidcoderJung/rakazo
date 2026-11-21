@@ -1,9 +1,11 @@
 import type { Connection, ConnectionCatalogItem } from "@rakazo/contracts";
+import { CONNECTION_LABEL_MAX_LENGTH, ConnectionLabelSchema } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   catalogItemAccounts,
   connectCatalogItem,
   connectCatalogMcpApp,
+  connectionLabelFrom,
   isCatalogItemConnected,
   nextCatalogAccountLabel,
   waitForConnection,
@@ -322,5 +324,28 @@ describe("bundled catalog connections", () => {
     await expect(connectCatalogMcpApp({ appId: "files" }, deps)).rejects.toThrow("restricted");
     expect(deps.authorize).not.toHaveBeenCalled();
     expect(deps.refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("connection labels from catalog names", () => {
+  const longName = "A".repeat(120);
+
+  it("cuts a long name and keeps the account number whole", () => {
+    const long = { ...item, name: longName };
+    const first = nextCatalogAccountLabel([], long);
+    expect(first).toBe("A".repeat(CONNECTION_LABEL_MAX_LENGTH));
+    const second = nextCatalogAccountLabel(
+      [{ ...account("a", "connected"), displayName: first }],
+      long,
+    );
+    expect(second).toBe(`${"A".repeat(CONNECTION_LABEL_MAX_LENGTH - 2)} 2`);
+    expect(ConnectionLabelSchema.safeParse(second).success).toBe(true);
+  });
+
+  it("does not split a surrogate pair and falls back to the slug for a blank name", () => {
+    expect(connectionLabelFrom("a".repeat(CONNECTION_LABEL_MAX_LENGTH - 1) + "😀", "x")).toBe(
+      "a".repeat(CONNECTION_LABEL_MAX_LENGTH - 1),
+    );
+    expect(nextCatalogAccountLabel([], { ...item, name: "  " })).toBe("gmail");
   });
 });
