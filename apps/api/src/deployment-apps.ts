@@ -6,9 +6,8 @@ import {
   persistPreparedSecret,
 } from "@rakazo/adapters";
 import type { Actor, ConnectionCatalogItem } from "@rakazo/contracts";
-import { availableInSpace, runAsSystemInTransaction } from "@rakazo/db";
+import { availableInSpace, lockOwner, runAsSystemInTransaction } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { lockOwner } from "./availability.js";
 import type { RouterContext } from "./routes/context.js";
 import { computerContext } from "./routes/shared.js";
 

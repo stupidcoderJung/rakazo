@@ -18,8 +18,8 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, LayoutTemplate, X } from "lucide-react";
 import { useState } from "react";
-import { useSpaceQueries } from "../../lib/query";
-import { AgentSkills } from "../../pages/KnowledgeSection";
+import { useSpaceQueries } from "../../lib/query/query";
+import { AgentSkills } from "../../pages/space/KnowledgeSection";
 import type { PluginSelection } from "./plugin-marketplace";
 import {
   PluginDetail,
@@ -173,7 +173,7 @@ export function SkillsDialog({
                     type="button"
                     data-testid="plugin-skill-set"
                     onClick={() => setSelection(set)}
-                    className={`flex min-w-0 items-center gap-3 rounded-xl px-2.5 py-2 text-start focus-visible:outline-none ${ROW_HOVER}`}
+                    className={`flex min-w-0 items-center gap-3 rounded-xl px-2.5 py-2 text-start focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 ${ROW_HOVER}`}
                   >
                     <PluginLogo name={set.name} logo={set.logo} site={set.site} />
                     <span className="min-w-0 flex-1">
@@ -198,7 +198,8 @@ export function SkillsDialog({
             aria-label={t`Search skills`}
             placeholder={t`Search skills`}
             maxLength={200}
-            className="mb-5 h-11 rounded-xl"
+            size="xl"
+            className="mb-5"
           />
           {catalog.isPending ? (
             <div className="grid place-items-center py-10">
@@ -232,6 +233,15 @@ export function SkillsDialog({
               );
             })}
           </div>
+          {!catalog.isPending &&
+          !catalog.error &&
+          !catalog.data?.unavailableRegistries.length &&
+          query.trim() !== "" &&
+          packs.length === 0 ? (
+            <p role="status" className="text-muted-foreground/80">
+              <Trans>No skills match your search.</Trans>
+            </p>
+          ) : null}
         </section>
       </div>
     );

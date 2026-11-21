@@ -10,17 +10,17 @@ import {
   catalogItemKey,
   connectCatalogItem,
   connectCatalogMcpApp,
+  connectedAppMarks,
   isCatalogItemConnected,
 } from "@rakazo/core";
 import { fetchFresh, writeSaved } from "@rakazo/core/query";
 import { queryOptions, skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { connectedAppMarks } from "../../lib/connected-apps";
-import { connectMcpOauth } from "../../lib/mcp-connect";
-import { optionalCatalogFeedProbe } from "../../lib/optional-catalog-feed";
-import { useSpaceQueries } from "../../lib/query";
-import { rpc } from "../../lib/rpc";
-import { errorText } from "../../lib/user-error";
+import { connectMcpOauth } from "../../lib/integrations/mcp-connect";
+import { optionalCatalogFeedProbe } from "../../lib/integrations/optional-catalog-feed";
+import { useSpaceQueries } from "../../lib/query/query";
+import { rpc } from "../../lib/query/rpc";
+import { errorText } from "../../lib/query/user-error";
 
 const NO_CATALOG: ConnectionCatalogItem[] = [];
 const NO_CONNECTIONS: Connection[] = [];

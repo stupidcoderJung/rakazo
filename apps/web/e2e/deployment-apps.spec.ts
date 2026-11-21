@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, signup } from "./helpers";
+import { captureScreenshot, completeOnboarding, signup } from "./helpers/helpers";
 
 test("bundled apps disclose missing setup and open account authorization without client credentials", async ({
   page,

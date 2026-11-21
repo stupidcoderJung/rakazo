@@ -136,7 +136,10 @@ describe("deployment apps", () => {
     const { ctx, insertMcpServer } = fixture();
     insertMcpServer.mockRejectedValueOnce(new Error("name conflict"));
     await expect(connectDeploymentApp(ctx, actor, "drive")).rejects.toThrow("name conflict");
-    expect(ctx.deps.secrets.delete).toHaveBeenCalledWith("encrypted-reference", "secret-id");
+    expect(ctx.deps.secrets.delete).toHaveBeenCalledWith(
+      "encrypted-reference",
+      expect.objectContaining({ recordId: "secret-id" }),
+    );
   });
 
   it("does not delete a prepared secret referenced by another owner", async () => {
