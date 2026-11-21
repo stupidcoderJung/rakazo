@@ -32,7 +32,7 @@ test("a group a bot creates after approval appears in the sidebar without a relo
   await page.keyboard.press("Enter");
 
   await expect(
-    page.getByTestId("transcript").getByText("Create group “Crew”?", { exact: true }),
+    page.getByTestId("pending-input-requests").getByText("Create group “Crew”?", { exact: true }),
   ).toBeVisible({
     timeout: 30_000,
   });
@@ -45,7 +45,9 @@ test("a group a bot creates after approval appears in the sidebar without a relo
   await composer.fill("ask me which city to use");
   await page.keyboard.press("Enter");
   await expect(
-    page.getByTestId("transcript").getByText("Which city should I use?", { exact: true }),
+    page
+      .getByTestId("pending-input-requests")
+      .getByText("Which city should I use?", { exact: true }),
   ).toBeVisible({
     timeout: 30_000,
   });
