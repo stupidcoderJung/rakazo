@@ -1,7 +1,8 @@
 import type { ConnectorProvider, JobPublisher, SecretStore } from "@rakazo/adapter-kit";
 import { routineJobKey, routineWakeupJob } from "@rakazo/adapter-kit";
-import type { RoutineWatch } from "@rakazo/contracts";
+import type { ChatPreferencesPatch, RoutineWatch } from "@rakazo/contracts";
 import {
+  ROUTINE_NAME_MAX_LENGTH,
   ROUTINE_WATCH_MIN_MINUTES,
   RoutineEmailSendersSchema,
   RoutineWatchSchema,
@@ -198,6 +199,9 @@ export function resolveScheduleTiming(
       const parsed = zonedDateTime(String(input.runAt), timezone);
       if (!parsed) return { ok: false, error: "runAt must be a valid ISO datetime." };
       nextRunAt = parsed;
+    }
+    if (Number.isNaN(nextRunAt.getTime())) {
+      return { ok: false, error: "The delay is too far in the future." };
     }
     if (nextRunAt.getTime() <= Date.now()) {
       return { ok: false, error: `One-shot schedules must run in the future. ${nowIn(timezone)}` };
@@ -411,7 +415,7 @@ export async function changeUserTimezone(
   },
   userId: string,
   timezone: string | null,
-  other?: {
+  other?: ChatPreferencesPatch & {
     locale?: string;
     botAvatarSet?: string;
     labs?: string[];
@@ -719,6 +723,7 @@ export async function createScheduleFromTool(
     botId: routineBotId,
     change: "created",
     name: row.name,
+    routine: { webhookEnabled: row.webhookEnabled, active: row.active },
   });
 
   return {
@@ -905,6 +910,7 @@ async function createWatchFromTool(
     botId: input.botId,
     change: "created",
     name: row.name,
+    routine: { webhookEnabled: row.webhookEnabled, active: row.active },
   });
   return {
     ok: true as const,
@@ -1025,6 +1031,8 @@ export async function updateScheduleFromTool(
   const name = input.name?.trim();
   const prompt = input.prompt?.trim();
   if (input.name !== undefined && !name) return { error: "name cannot be empty." };
+  if (name && name.length > ROUTINE_NAME_MAX_LENGTH)
+    return { error: `name must be at most ${ROUTINE_NAME_MAX_LENGTH} characters.` };
   if (input.prompt !== undefined && !prompt) return { error: "prompt cannot be empty." };
 
   const scope = {
@@ -1249,6 +1257,7 @@ export async function updateScheduleFromTool(
       botId: input.botId,
       change: routineEditChange(existing, saved),
       name: saved.name,
+      routine: { webhookEnabled: saved.webhookEnabled, active: saved.active },
     });
   }
 

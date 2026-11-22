@@ -67,7 +67,7 @@ export async function connectCatalogMcpApp(
   deps: {
     connect: (input: { appId: string; botId?: string }) => Promise<{ serverId: string }>;
     authorize: (serverId: string) => Promise<unknown>;
-    refresh: () => Promise<unknown>;
+    refresh?: () => Promise<unknown>;
     signal: AbortSignal;
     isCurrent?: () => boolean;
   },
@@ -77,7 +77,7 @@ export async function connectCatalogMcpApp(
   const { serverId } = await deps.connect(input);
   if (stopped()) return;
   await deps.authorize(serverId);
-  if (!stopped()) await deps.refresh();
+  if (!stopped()) await deps.refresh?.();
 }
 
 const CATALOG_CONNECT_POLL_ATTEMPTS = 45;
