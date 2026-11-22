@@ -12,7 +12,9 @@ async function send(page: Page, text: string) {
   const composer = page.getByRole("combobox", { name: /Message/ });
   await composer.fill(text);
   await composer.press("Enter");
-  await expect(page.getByTestId("message-user-bubble").filter({ hasText: text })).toBeVisible();
+  const bubble = page.getByTestId("message-user-bubble").filter({ hasText: text });
+  await expect(bubble).toHaveCount(1);
+  await expect(bubble).toBeVisible();
 }
 
 test("an owner invites someone by link and both see the space's members", async ({

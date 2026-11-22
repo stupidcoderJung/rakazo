@@ -97,12 +97,13 @@ export function useTranscriptView({
       }),
     [archivedBots, bots, transcriptMembers],
   );
+  const composerRunning = currentRuns.some((run) => isActive(run.status));
   return {
     activeSnapshot,
-    pendingInputs,
+    composerProps: { activeSnapshot, pendingInputs, running: composerRunning },
     transcript,
     artifactTarget,
-    composerRunning: currentRuns.some((run) => isActive(run.status)),
+    composerRunning,
     resolveBot,
     resolveMemberName,
     /** What the transcript draws from the open chat's snapshot. */

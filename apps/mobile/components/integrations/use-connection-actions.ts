@@ -133,7 +133,7 @@ export function useConnectionActions({
                 } catch (reason) {
                   if (
                     !input.botId ||
-                    (reason as { code?: string }).code !== "NOT_FOUND" ||
+                    (reason as { code?: string } | null)?.code !== "NOT_FOUND" ||
                     !current()
                   )
                     throw reason;
@@ -146,8 +146,6 @@ export function useConnectionActions({
                 setOauthServerId(serverId);
                 return signInToMcpServer(send, serverId);
               },
-              // useSave invalidates the catalog and server queries on success.
-
               signal: controller.signal,
               isCurrent: current,
             },

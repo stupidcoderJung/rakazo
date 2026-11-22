@@ -592,7 +592,6 @@ it("opens a bundled app's matching plugin skills while keeping its connection se
   ).toBe(true);
 });
 
-
 it("keeps Close outside the wrapping action group so narrow screens still reach it", async () => {
   await act(async () =>
     root.render(

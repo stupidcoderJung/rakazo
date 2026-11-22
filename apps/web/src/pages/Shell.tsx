@@ -763,17 +763,15 @@ function SpaceShell() {
         composer={
           <ChatComposerArea
             composer={composer}
-            pendingInputs={view.pendingInputs}
+            {...view.composerProps}
             rpc={rpc}
             inGroup={inGroup}
             groupId={groupId}
             active={active}
             activeGroup={activeGroup}
-            activeSnapshot={activeSnapshot}
             meId={userId}
             memberName={view.resolveMemberName}
             recordingSkill={Boolean(recordingSkill)}
-            running={composerRunning}
             enterToSend={enterToSend}
             sendColors={userBubble}
             modelPicker={chatPreferences.composerModelPicker ? modelShortcuts.pickerProps : null}

@@ -227,7 +227,7 @@ test("create group from + and see two bots in one transcript", async ({ page }, 
   await composer.press("Enter");
   const cityAnswer = page.getByTestId("message-user-bubble").filter({ hasText: /^Paris$/ });
   await expect(cityAnswer).toBeVisible({ timeout: 30_000 });
-  const answeredQuestion = page
+  const answeredQuestion = transcript
     .getByTestId("question-card")
     .filter({ hasText: "Which city should I use?" });
   await expect(answeredQuestion).toHaveClass(/opacity-50/);

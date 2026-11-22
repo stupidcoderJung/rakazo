@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { readBoundedResponseBytes, withAbort } from "@rakazo/core";
+import { cancelResponseBody, readBoundedResponseBytes, withAbort } from "@rakazo/core";
 import { z } from "zod";
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -35,7 +35,7 @@ export function createDriveMcpServer(accessToken: string, fetcher: typeof fetch 
       signal: combined,
     });
     if (!response.ok) {
-      void response.body?.cancel().catch(() => undefined);
+      cancelResponseBody(response);
       // Never forward provider bodies, request headers or transport errors to the model.
       throw new Error(`Drive request failed (${response.status})`);
     }

@@ -24,7 +24,7 @@ for (const viewport of [
     expect(card!.y + card!.height).toBeLessThanOrEqual(before!.y);
     await expect(page.getByTestId("vault-editor")).toHaveCount(0);
     await captureScreenshot(page, testInfo, "pending-input");
-    await pending.getByRole("button", { name: "Add", exact: true }).click();
+    await pending.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(page.getByTestId("vault-editor")).toBeVisible();
     await captureScreenshot(page, testInfo, "pending-input-form");
     await page.keyboard.press("Escape");
@@ -32,14 +32,14 @@ for (const viewport of [
     await page.reload();
     await expect(pending).toBeVisible();
     await expect(page.getByTestId("tool-activity")).toHaveCount(0);
-    await pending.getByRole("button", { name: "Add", exact: true }).click();
+    await pending.getByRole("button", { name: "Continue", exact: true }).click();
     await page
       .getByTestId("vault-editor")
-      .getByRole("button", { name: "Dismiss", exact: true })
+      .getByRole("button", { name: "Dismiss request", exact: true })
       .click();
     await expect(pending).toHaveCount(0);
     await page.reload();
-    await pending.getByRole("button", { name: "Add", exact: true }).click();
+    await pending.getByRole("button", { name: "Continue", exact: true }).click();
     const form = page.getByTestId("vault-editor");
     await form.getByLabel("Full name", { exact: true }).fill("Example Recipient");
     await form.getByRole("button", { name: "Save", exact: true }).click();

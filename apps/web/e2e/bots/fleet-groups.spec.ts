@@ -102,9 +102,9 @@ test(
     await composer.fill(`set the model of bot ${scout.id} to openai/gpt-6-luna`);
     await page.keyboard.press("Enter");
     const card = page
-      .locator("[data-message-id]")
-      .filter({ has: page.getByText("Change the model of Scout?", { exact: true }) })
-      .last();
+      .getByTestId("pending-input-requests")
+      .locator(".bg-card")
+      .filter({ has: page.getByText("Change the model of Scout?", { exact: true }) });
     await expect(card.getByText("From: OpenAI: GPT-6 Sol", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
@@ -114,22 +114,20 @@ test(
     const a = await allow.boundingBox();
     const d = await deny.boundingBox();
     expect(a?.y).toBe(d?.y);
-    expect(
-      (await card.locator("[data-testid=message-bubble-frame]").boundingBox())?.width,
-    ).toBeGreaterThan(450);
+    expect((await card.boundingBox())?.width).toBeGreaterThan(450);
     await captureScreenshot(page, testInfo, "fleet-model-change-approval");
     await page.setViewportSize({ width: 400, height: 900 });
     await expect(allow).toBeVisible();
-    expect(
-      (await card.locator("[data-testid=message-bubble-frame]").boundingBox())?.width,
-    ).toBeGreaterThan(200);
+    expect((await card.boundingBox())?.width).toBeGreaterThan(200);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       400,
     );
     await deny.scrollIntoViewIfNeeded();
     await captureScreenshot(page, testInfo, "fleet-model-change-approval-narrow");
     await deny.click();
-    await expect(card.getByText("Denied", { exact: true })).toHaveClass(/text-muted-foreground/);
+    await expect(page.getByTestId("transcript").getByText("Denied", { exact: true })).toHaveClass(
+      /text-muted-foreground/,
+    );
   },
 );
 
@@ -162,10 +160,10 @@ test("the instruction rewrite approval says what approving does, and approving a
   );
   // Enter is ignored while the spawn send is still pending; the button waits until it is enabled.
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  const card = page
-    .locator("[data-message-id]")
-    .filter({ has: page.getByText("Replace the instructions of Scout?", { exact: true }) })
-    .last();
+  const card = page.getByTestId("pending-input-requests");
+  await expect(card.getByText("Replace the instructions of Scout?", { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
   await expect(card.getByText("New length: 16 characters", { exact: false })).toBeVisible({
     timeout: 30_000,
   });

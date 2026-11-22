@@ -116,10 +116,12 @@ def handler(path: str):
             response = upstream.getresponse()
             self.send_response(response.status)
             for name, value in response.getheaders():
-                if name.lower() not in ("connection", "content-length", "transfer-encoding") and not any(
-                    c in name + value for c in "\r\n"
-                ):
-                    self.send_header(name, value)
+                clean_name = name.replace("\r", "").replace("\n", "")
+                clean_value = value.replace("\r", "").replace("\n", "")
+                if (clean_name, clean_value) != (name, value):
+                    continue
+                if clean_name.lower() not in ("connection", "content-length", "transfer-encoding"):
+                    self.send_header(clean_name, clean_value)
             self.send_header("transfer-encoding", "chunked")
             self.end_headers()
             while chunk := response.read1(65536):
