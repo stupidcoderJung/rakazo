@@ -104,6 +104,13 @@ export const ENCRYPTED_MODELS: Record<string, ModelSpec> = {
     space: { column: "spaceId" },
     ownerRelation: "user",
   },
+  /** The text that starts a run: often the person's own words, answers to a bot's questions included. */
+  Task: {
+    table: "tasks",
+    fields: { prompt: {} },
+    space: { column: "spaceId" },
+    ownerRelation: "thread",
+  },
   /** A bot's inbox. Recipients and file names stay plaintext; `key` and `messageId` are lookups. */
   BotEmailMessage: {
     table: "bot_email_messages",
@@ -549,7 +556,8 @@ export function withContentEncryption(prisma: PrismaClient, ring: ContentKeyRing
         throw new Error(`Upserts of encrypted ${model} content are not supported`);
       return args;
     }
-    if (!ring.encryptWrites) return plainWrite(spec, operation, args);
+    // During the reader rollout older replicas still need plaintext task prompts.
+    if (model === "Task" || !ring.encryptWrites) return plainWrite(spec, operation, args);
     if (operation === "create") return { ...args, data: await sealCreate(spec, args.data) };
     if (operation === "createMany" || operation === "createManyAndReturn") {
       const data = Array.isArray(args.data)
@@ -577,7 +585,7 @@ export function withContentEncryption(prisma: PrismaClient, ring: ContentKeyRing
       return rows;
     },
     async sealRow(model, row) {
-      if (!ring.encryptWrites) return row;
+      if (model === "Task" || !ring.encryptWrites) return row;
       return (await sealCreate(ENCRYPTED_MODELS[model]!, row)) as typeof row;
     },
     async messageSearchTokens(spaceId, query, domain) {
