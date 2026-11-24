@@ -47,7 +47,12 @@ export function objectStorageTargetFromEnv(
   const endpoint = env.OBJECT_STORAGE_ENDPOINT?.trim() || undefined;
   if (endpoint && !/^https?:\/\//.test(endpoint))
     throw new Error("OBJECT_STORAGE_ENDPOINT must be an http(s) URL");
-  const prefix = (env.OBJECT_STORAGE_PREFIX?.trim() ?? "").replace(/^\/+|\/+$/g, "");
+  const configuredPrefix = env.OBJECT_STORAGE_PREFIX?.trim() ?? "";
+  let start = 0;
+  let end = configuredPrefix.length;
+  while (start < end && configuredPrefix[start] === "/") start++;
+  while (end > start && configuredPrefix[end - 1] === "/") end--;
+  const prefix = configuredPrefix.slice(start, end);
   return { bucket, endpoint, prefix: prefix ? `${prefix}/` : "" };
 }
 

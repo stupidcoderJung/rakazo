@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AzureBlobObjectStorage } from "../providers/object-storage/azure-blob/azure-blob-object-storage.js";
 import { S3ObjectStorage } from "../providers/object-storage/s3/s3-object-storage.js";
 import { createObjectStorage } from "./create-object-storage.js";
+import { objectStorageTargetFromEnv } from "./object-storage-common.js";
 
 describe("createObjectStorage", () => {
   const base = {
@@ -19,6 +20,14 @@ describe("createObjectStorage", () => {
     expect(createObjectStorage({ ...base, OBJECT_STORAGE_PROTOCOL: "S3" })).toBeInstanceOf(
       S3ObjectStorage,
     );
+  });
+
+  it("normalizes only the outer slashes of the shared storage prefix", () => {
+    expect(
+      objectStorageTargetFromEnv({ ...base, OBJECT_STORAGE_PREFIX: "  ///images//2026///  " })
+        ?.prefix,
+    ).toBe("images//2026/");
+    expect(objectStorageTargetFromEnv({ ...base, OBJECT_STORAGE_PREFIX: "////" })?.prefix).toBe("");
   });
 
   it("selects the Azure Blob backend", () => {
