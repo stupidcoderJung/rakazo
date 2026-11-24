@@ -61,13 +61,34 @@ RUN RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web build
 RUN find . -name node_modules -type d -prune -exec rm -rf {} + \
   && rm -rf apps/desktop apps/mobile apps/www docs examples
 
+# Bookworm's packaged SSH client still carries CVE-2026-60002. Build the portable
+# client for the runtime ABI and verify the upstream release checksum before extraction.
+FROM node:24.22.3-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496 AS ssh-client
+RUN apt-get update && apt-get install -y --no-install-recommends libfido2-dev libedit-dev libkrb5-dev openssh-client
+WORKDIR /build
+RUN curl -fsSLo openssh.tar.gz https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-10.6p2.tar.gz \
+  && echo '9ae44872090cf2f06b3cf9ff147e7f16f309671340763ed2f99248398ae29d5b  openssh.tar.gz' | sha256sum -c - \
+  && tar -xzf openssh.tar.gz --strip-components=1
+RUN ./configure --prefix=/usr --sysconfdir=/etc/ssh --libexecdir=/usr/lib/openssh \
+      --with-kerberos5=/usr --with-libedit --with-security-key-builtin \
+  && make -j2 ssh scp sftp ssh-add ssh-agent ssh-keygen ssh-keyscan ssh-keysign ssh-pkcs11-helper ssh-sk-helper \
+  && install -d /client/usr/bin /client/usr/lib/openssh /client/etc/ssh/ssh_config.d \
+  && install -s ssh scp sftp ssh-add ssh-agent ssh-keygen ssh-keyscan /client/usr/bin/ \
+  && install -s ssh-keysign ssh-pkcs11-helper ssh-sk-helper /client/usr/lib/openssh/ \
+  && ln -s ssh /client/usr/bin/slogin \
+  && install -m 0755 contrib/ssh-copy-id /client/usr/bin/ssh-copy-id \
+  && install -m 0644 /etc/ssh/ssh_config /client/etc/ssh/ssh_config \
+  && install -D -m 0644 LICENCE /client/usr/share/doc/openssh-client/copyright
+
 FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
 COPY infra/sandboxes/computer/apt-security.sh /tmp/apt-security.sh
 RUN /tmp/apt-security.sh
 # Prisma's migration engine detects and links against OpenSSL. A stdio MCP server that runs on
 # another machine is launched over ssh, which the slim base image does not ship.
-RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends openssl openssh-client \
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends openssl libfido2-1 libedit2 libgssapi-krb5-2 \
   && rm -rf /var/lib/apt/lists/*
+COPY --from=ssh-client /client/ /
+RUN ssh -V && ssh -G localhost >/dev/null
 # Managed stdio package installs need npm; the Node image bundles an older copy.
 RUN npm install --global --ignore-scripts npm@11.21.2 && npm cache clean --force
 ENV COREPACK_HOME=/usr/local/share/corepack
@@ -77,11 +98,12 @@ WORKDIR /app
 # --link keeps each layer independent of the ones below, so an unchanged one is reused as is.
 COPY --link --from=deps /app /app
 COPY --link --from=build /app /app
-RUN install -d -m 750 -o node -g node /data /app/apps/web/node_modules/.vite-temp /app/apps/web/asset-archive
+RUN install -d -m 750 -o node -g node /data /app/apps/web/node_modules/.vite-temp /app/apps/web/asset-archive /run/ingress
 # Last root step, so a cached earlier layer cannot be the filesystem that ships.
 RUN /tmp/apt-security.sh --check && rm -f /tmp/apt-security.sh
 ARG GIT_SHA
 ENV NODE_ENV=production
+ENV EMAIL_COPY_DIR=/app/email-copy
 ENV GIT_SHA=$GIT_SHA
 EXPOSE 3100 5173 7091
 # The signal on which a replaced API lets its chat turns end before it exits (apps/api/src/http/drain.ts).

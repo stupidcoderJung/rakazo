@@ -12,28 +12,28 @@ import type { RouterContext } from "./routes/context.js";
 import { computerContext } from "./routes/shared.js";
 
 function apps(ctx: RouterContext) {
-  return deploymentApps(ctx.deps.env.deploymentApps).map((app) => ({
-    ...app,
-    config:
-      app.config?.transport === "stdio" &&
-      ctx.deps.env.mcpStdioEnabled &&
-      (ctx.deps.env.mcpStdioAllowedCommands ?? []).includes(app.config.command)
-        ? app.config
-        : null,
-  }));
+  try {
+    return deploymentApps(ctx.deps.env.deploymentApps).map((app) => ({
+      ...app,
+      config:
+        app.config?.transport === "stdio" &&
+        ctx.deps.env.mcpStdioEnabled &&
+        (ctx.deps.env.mcpStdioAllowedCommands ?? []).includes(app.config.command)
+          ? app.config
+          : null,
+    }));
+  } catch {
+    getLogger().warn("Bundled app configuration is invalid");
+    return null;
+  }
 }
 
 export async function deploymentAppCatalog(
   ctx: RouterContext,
   actor: Actor,
 ): Promise<ConnectionCatalogItem[]> {
-  let catalog: ReturnType<typeof apps>;
-  try {
-    catalog = apps(ctx);
-  } catch {
-    getLogger().warn("Bundled app configuration is invalid");
-    return [];
-  }
+  const catalog = apps(ctx);
+  if (!catalog) return [];
   const rows = await ctx.deps.prisma.mcpServer.findMany({
     where: {
       ...availableInSpace(actor),
@@ -66,12 +66,10 @@ export async function connectDeploymentApp(
   appId: string,
   botId?: string,
 ) {
-  let app: ReturnType<typeof apps>[number] | undefined;
-  try {
-    app = apps(ctx).find((app) => app.id === appId);
-  } catch {
+  const catalog = apps(ctx);
+  if (!catalog)
     throw new ORPCError("PRECONDITION_FAILED", { message: "This app needs server setup." });
-  }
+  const app = catalog.find((entry) => entry.id === appId);
   if (!app) throw new ORPCError("NOT_FOUND");
   if (!app.config)
     throw new ORPCError("PRECONDITION_FAILED", { message: "This app needs server setup." });

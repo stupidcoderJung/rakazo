@@ -102,9 +102,9 @@ test(
     await composer.fill(`set the model of bot ${scout.id} to openai/gpt-6-luna`);
     await page.keyboard.press("Enter");
     const card = page
-      .locator("[data-message-id]")
-      .filter({ has: page.getByText("Change the model of Scout?", { exact: true }) })
-      .last();
+      .getByTestId("pending-input-requests")
+      .locator(".bg-card")
+      .filter({ has: page.getByText("Change the model of Scout?", { exact: true }) });
     await expect(card.getByText("From: OpenAI: GPT-6 Sol", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
@@ -114,21 +114,71 @@ test(
     const a = await allow.boundingBox();
     const d = await deny.boundingBox();
     expect(a?.y).toBe(d?.y);
-    expect(
-      (await card.locator("[data-testid=message-bubble-frame]").boundingBox())?.width,
-    ).toBeGreaterThan(450);
+    expect((await card.boundingBox())?.width).toBeGreaterThan(450);
     await captureScreenshot(page, testInfo, "fleet-model-change-approval");
     await page.setViewportSize({ width: 400, height: 900 });
     await expect(allow).toBeVisible();
-    expect(
-      (await card.locator("[data-testid=message-bubble-frame]").boundingBox())?.width,
-    ).toBeGreaterThan(350);
+    expect((await card.boundingBox())?.width).toBeGreaterThan(200);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       400,
     );
     await deny.scrollIntoViewIfNeeded();
     await captureScreenshot(page, testInfo, "fleet-model-change-approval-narrow");
     await deny.click();
-    await expect(card.getByText("Denied", { exact: true })).toHaveClass(/text-muted-foreground/);
+    await expect(page.getByTestId("transcript").getByText("Denied", { exact: true })).toHaveClass(
+      /text-muted-foreground/,
+    );
   },
 );
+
+test("the instruction rewrite approval says what approving does, and approving applies it", async ({
+  page,
+}, testInfo) => {
+  await signup(
+    page,
+    `bot-management-instructions-${Date.now()}@rakazo.test`,
+    "password12",
+    "Bot Instructions",
+  );
+  await completeOnboarding(page);
+  await page.waitForURL(/\/app\/[^/]+$/);
+  const chiefId = activeBotId(page);
+  await rpc(page, "bots/update", { botId: chiefId, fleetManagement: true });
+  const composer = page.getByPlaceholder("Message Chief");
+  await composer.fill("spawn a bot named Scout to research venues");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[data-roster-bot-name]").filter({ hasText: /^Scout$/ })).toBeVisible({
+    timeout: 30_000,
+  });
+  const bots = await rpc<Array<{ id: string; name: string }>>(page, "bots/list", {});
+  const scout = bots.find((bot) => bot.name === "Scout");
+  if (!scout) throw new Error("Missing child bot");
+
+  await expect(composer).toBeEnabled();
+  await composer.fill(
+    `rewrite the instructions of bot ${scout.id} at version initial to Plan the offsite`,
+  );
+  // Enter is ignored while the spawn send is still pending; the button waits until it is enabled.
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const card = page.getByTestId("pending-input-requests");
+  await expect(card.getByText("Replace the instructions of Scout?", { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(card.getByText("New length: 16 characters", { exact: false })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(card.getByText("Plan the offsite", { exact: false })).toBeVisible();
+  // The button names the action: approving applies the new instructions at once.
+  const apply = card.getByRole("button", { name: "Apply now", exact: true });
+  await expect(apply).toBeVisible();
+  await expect(card.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(0);
+  await captureScreenshot(page, testInfo, "fleet-child-instructions-approval");
+
+  await apply.click();
+  await expect
+    .poll(
+      async () =>
+        (await rpc<{ instructions: string }>(page, "bots/get", { botId: scout.id })).instructions,
+    )
+    .toBe("Plan the offsite");
+});

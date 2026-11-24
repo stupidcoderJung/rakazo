@@ -12,7 +12,9 @@ async function send(page: Page, text: string) {
   const composer = page.getByRole("combobox", { name: /Message/ });
   await composer.fill(text);
   await composer.press("Enter");
-  await expect(page.getByTestId("message-user-bubble").filter({ hasText: text })).toBeVisible();
+  const bubble = page.getByTestId("message-user-bubble").filter({ hasText: text });
+  await expect(bubble).toHaveCount(1);
+  await expect(bubble).toBeVisible();
 }
 
 test("an owner invites someone by link and both see the space's members", async ({
@@ -31,8 +33,7 @@ test("an owner invites someone by link and both see the space's members", async 
   await ownerPage.reload();
 
   const ownerSidebar = ownerPage.locator("aside").first();
-  await ownerSidebar.getByRole("button", { name: "Actions for Home" }).click();
-  await ownerPage.getByRole("menuitem", { name: "Settings" }).click();
+  await ownerSidebar.getByRole("button", { name: "Settings for Home" }).press("Enter");
   const ownerSettings = ownerPage.getByTestId("user-settings");
   await expect(ownerSettings).toHaveAttribute("data-settings-section", "space");
   await expect(ownerSettings.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
@@ -62,8 +63,7 @@ test("an owner invites someone by link and both see the space's members", async 
 
   const inviteeSidebar = inviteePage.locator("aside").first();
   await expect(inviteeSidebar.getByText("Home", { exact: true })).toBeVisible();
-  await inviteeSidebar.getByRole("button", { name: "Actions for Home" }).click();
-  await inviteePage.getByRole("menuitem", { name: "Settings" }).click();
+  await inviteeSidebar.getByRole("button", { name: "Settings for Home" }).press("Enter");
   const inviteeSettings = inviteePage.getByTestId("user-settings");
   await expect(inviteeSettings.getByText("Ada Owner")).toBeVisible();
   await expect(inviteeSettings.getByText("Bob Invitee")).toBeVisible();
