@@ -42,6 +42,9 @@ function setup() {
     provider,
     source: { kind: "hosted" as const },
     prisma: {
+      $transaction: (
+        operation: (tx: { externalEffect: typeof externalEffect }) => Promise<unknown>,
+      ) => operation({ externalEffect }),
       externalEffect,
       artifact: { findFirst: vi.fn().mockResolvedValue(null) },
     } as unknown as PrismaClient,

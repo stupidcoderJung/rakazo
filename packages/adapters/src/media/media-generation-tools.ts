@@ -8,7 +8,7 @@ import { MediaGenerationError } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { messageBlockForArtifact } from "@rakazo/core";
 import type { ExternalEffect, Prisma, PrismaClient } from "@rakazo/db";
-import { isUniqueViolation, readJsonColumn } from "@rakazo/db";
+import { isUniqueViolation, readJsonColumn, withTransactionRetry } from "@rakazo/db";
 import { z } from "zod";
 import { mediaPromptSchema, validateGeneratedMedia } from "./media-generation-provider.js";
 import type { MediaSourceRecord } from "./media-sources.js";
@@ -74,7 +74,10 @@ export async function generateMediaFromTool(options: {
   /** Commits with a video's provider failure, so whatever follows it cannot be lost. */
   onSettled?: (tx: Prisma.TransactionClient, status: "failed") => Promise<void>;
   /** Prices a new submission, or refuses it; without one nothing is charged. */
-  price?: (kind: "image" | "video") => Promise<{ charge: MediaCharge | null } | { error: string }>;
+  price?: (
+    kind: "image" | "video",
+    tx: Prisma.TransactionClient,
+  ) => Promise<{ charge: MediaCharge | null } | { error: string }>;
 }) {
   const { provider, prisma, context, run, args } = options;
   const video = options.name === "generate_video";
@@ -145,33 +148,64 @@ export async function generateMediaFromTool(options: {
         if (options.recoverOnly) return undefined;
         const input = mediaPromptSchema.safeParse(args);
         if (!input.success) return { error: "A prompt of 1–4000 characters is required." };
-        const priced = options.price
-          ? await options.price(video ? "video" : "image")
-          : { charge: null };
-        if ("error" in priced) return { error: priced.error };
-        // A unique slot makes the per-run cap durable even across concurrent calls/restarts.
+        const create = (
+          db: Pick<PrismaClient, "externalEffect">,
+          slot: number,
+          charge: MediaCharge | null,
+        ) =>
+          db.externalEffect.create({
+            data: {
+              spaceId: run.spaceId,
+              runId: run.id,
+              kind: MEDIA_JOB_KIND,
+              idempotencyKey: `media:${run.id}:${slot}`,
+              status: "media_submitting",
+              request: {
+                tool: options.name,
+                prompt: input.data.prompt,
+                executionId: options.executionId,
+                ...(charge ? { charge } : {}),
+                mediaSource: options.source,
+                ...(options.threadGeneration === undefined
+                  ? {}
+                  : { threadGeneration: options.threadGeneration }),
+              },
+              result: { provider: provider.id },
+            },
+          });
+        const price = options.price;
         for (let slot = 0; slot < 2; slot++) {
           try {
-            reservation = await prisma.externalEffect.create({
-              data: {
-                spaceId: run.spaceId,
-                runId: run.id,
-                kind: MEDIA_JOB_KIND,
-                idempotencyKey: `media:${run.id}:${slot}`,
-                status: "media_submitting",
-                request: {
-                  tool: options.name,
-                  prompt: input.data.prompt,
-                  executionId: options.executionId,
-                  ...(priced.charge ? { charge: priced.charge } : {}),
-                  mediaSource: options.source,
-                  ...(options.threadGeneration === undefined
-                    ? {}
-                    : { threadGeneration: options.threadGeneration }),
-                },
-                result: { provider: provider.id },
-              },
-            });
+            if (price) {
+              // The price check and pending job share a snapshot and commit. A concurrent
+              // reservation that read the same balance retries before contacting the provider.
+              const held = await withTransactionRetry(() =>
+                prisma.$transaction(
+                  async (tx) => {
+                    const duplicate = await tx.externalEffect.findFirst({
+                      where: {
+                        runId: run.id,
+                        kind: MEDIA_JOB_KIND,
+                        request: { path: ["executionId"], equals: options.executionId },
+                      },
+                      select: { id: true },
+                    });
+                    if (duplicate)
+                      return {
+                        error: "Submission already attempted. Do not resubmit automatically.",
+                      };
+                    const quoted = await price(video ? "video" : "image", tx);
+                    if ("error" in quoted) return quoted;
+                    return { job: await create(tx, slot, quoted.charge) };
+                  },
+                  { isolationLevel: "Serializable" },
+                ),
+              );
+              if ("error" in held) return { error: held.error };
+              reservation = held.job;
+            } else {
+              reservation = await create(prisma, slot, null);
+            }
             break;
           } catch (error) {
             if (!isUniqueViolation(error)) throw error;

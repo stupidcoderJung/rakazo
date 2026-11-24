@@ -10,11 +10,19 @@ import type {
 } from "@rakazo/adapter-kit";
 import { MediaGenerationError } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
-import { asSystem, clearThread, createDb, runAsSystem, runAsTenant } from "@rakazo/db";
+import {
+  asSystem,
+  clearThread,
+  createDb,
+  runAsSystem,
+  runAsSystemInTransaction,
+  runAsTenant,
+} from "@rakazo/db";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createArtifactStore } from "../storage/artifact-store-factory.js";
 import { FakeMediaGenerationProvider } from "./media-generation-provider.js";
 import { generateMediaFromTool } from "./media-generation-tools.js";
+import { queuedMediaMicros } from "./media-queued.js";
 import type { MediaSourceRecord } from "./media-sources.js";
 import {
   MEDIA_POLL_DEADLINE_MS,
@@ -66,21 +74,23 @@ describePostgres("background video delivery (PostgreSQL)", () => {
     await db.pool.end();
   });
 
-  async function owner() {
+  async function owner(sharedOrganizationId?: string) {
     const id = randomUUID();
     users.push(id);
     return runAsSystem("test fixture", async () => {
       await prisma.user.create({
         data: { id, name: "Video test", email: `${id}@example.test`, emailVerified: true },
       });
-      await prisma.organization.create({
-        data: { id, name: "Video test", slug: id, createdAt: new Date() },
-      });
+      const organizationId = sharedOrganizationId ?? id;
+      if (!sharedOrganizationId)
+        await prisma.organization.create({
+          data: { id, name: "Video test", slug: id, createdAt: new Date() },
+        });
       await prisma.space.create({
-        data: { id, organizationId: id, name: "Video test", isDefault: true },
+        data: { id, organizationId, name: "Video test", isDefault: !sharedOrganizationId },
       });
       await prisma.member.create({
-        data: { id, organizationId: id, userId: id, role: "owner", createdAt: new Date() },
+        data: { id, organizationId, userId: id, role: "owner", createdAt: new Date() },
       });
       const bot = await prisma.bot.create({
         data: { spaceId: id, userId: id, name: "Video test", color: "test-color" },
@@ -113,8 +123,8 @@ describePostgres("background video delivery (PostgreSQL)", () => {
     });
   }
 
-  async function setup() {
-    const user = await owner();
+  async function setup(sharedOrganizationId?: string) {
+    const user = await owner(sharedOrganizationId);
     const media = new ScriptedVideoProvider();
     const enqueued: BackgroundJob[] = [];
     const queue = { down: false };
@@ -153,6 +163,7 @@ describePostgres("background video delivery (PostgreSQL)", () => {
     const submit = async (
       ended: "completed" | "cancelled" = "completed",
       source: MediaSourceRecord = { kind: "hosted" },
+      price?: Parameters<typeof generateMediaFromTool>[0]["price"],
     ) => {
       const deps = process();
       const result = await runAsTenant(tenant, () =>
@@ -162,6 +173,7 @@ describePostgres("background video delivery (PostgreSQL)", () => {
           executionId: randomUUID(),
           provider: media,
           source,
+          price,
           prisma,
           context: {
             operationId: randomUUID(),
@@ -251,6 +263,23 @@ describePostgres("background video delivery (PostgreSQL)", () => {
       tenant,
     };
   }
+
+  it("reserves one remaining generation across simultaneous runs in different spaces", async () => {
+    const a = await setup();
+    const organizationId = a.user.id;
+    const b = await setup(organizationId);
+    const quote: NonNullable<Parameters<typeof generateMediaFromTool>[0]["price"]> = (_, tx) =>
+      runAsSystemInTransaction(tx, "test organization's last generation", async () =>
+        (await queuedMediaMicros(tx, organizationId)) > 0
+          ? { error: "Allowance exhausted." }
+          : { charge: { organizationId, micros: 1 } },
+      );
+    const attempts = await Promise.allSettled(
+      [a, b].map((h) => h.submit("completed", { kind: "hosted" }, quote)),
+    );
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    expect(a.media.submissions + b.media.submissions).toBe(1);
+  });
 
   it("posts a video finished after a restart to the chat that asked, once", async () => {
     const h = await setup();

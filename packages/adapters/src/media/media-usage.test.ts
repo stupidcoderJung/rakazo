@@ -106,7 +106,7 @@ describe("hosted media pricing", () => {
 
   it("never prices media made with the owner's own connection", () => {
     const own = { record: { kind: "connection", connectionId: "c" } as const, provider };
-    expect(hostedMediaPrice(prisma({ billing: true }), own, "space")).toBeUndefined();
+    expect(hostedMediaPrice(own, "space")).toBeUndefined();
   });
   it("stops offering hosted media one generation of which costs more than the monthly balance", async () => {
     const dear = {

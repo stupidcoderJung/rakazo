@@ -4,7 +4,7 @@ import { MEDIA_JOB_KIND, savedMediaCharge } from "./media-generation-tools.js";
 import { MEDIA_POLL_DEADLINE_MS } from "./media-video-poll.js";
 
 /**
- * What the organization's videos still running at the provider will charge once they complete,
+ * What the organization's pending image and video jobs will charge once they complete,
  * so they hold their price from submission. One already charged counts only as its charge. Past
  * the poll deadline a video holds nothing, so one left waiting (its hosted model since turned off)
  * never keeps the balance; if it does finish, its charge still counts.
@@ -16,9 +16,7 @@ export async function queuedMediaMicros(
   const jobs = await prisma.externalEffect.findMany({
     where: {
       kind: MEDIA_JOB_KIND,
-      // Images finish within their turn and are charged there; only videos keep running.
-      request: { path: ["tool"], equals: "generate_video" },
-      status: { in: ["media_pending", "media_polling"] },
+      status: { in: ["media_submitting", "media_pending", "media_polling"] },
       createdAt: { gte: new Date(Date.now() - MEDIA_POLL_DEADLINE_MS) },
       space: { organizationId },
     },

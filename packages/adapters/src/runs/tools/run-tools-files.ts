@@ -141,7 +141,7 @@ export async function callMediaTool(ctx: RunContext, call: ToolCall, recoverOnly
     context,
     run,
     threadGeneration: thread.historyCompactionGeneration,
-    price: hostedMediaPrice(deps.prisma, source, run.spaceId),
+    price: hostedMediaPrice(source, run.spaceId),
     ...mediaDelivery({ ...deps, artifacts: deps.artifacts }, run, {
       providerId: mediaGeneration.id,
       groupId: await artifactGroupId(ctx),

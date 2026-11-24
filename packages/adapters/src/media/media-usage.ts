@@ -1,7 +1,7 @@
 import type { MediaGenerationProvider } from "@rakazo/adapter-kit";
 import { MEDIA_ALLOWANCE_CENTS } from "@rakazo/contracts";
-import type { PrismaClient } from "@rakazo/db";
-import { mediaAllowancePlan, mediaChargedMicros } from "@rakazo/db";
+import type { Prisma, PrismaClient } from "@rakazo/db";
+import { mediaAllowancePlan, mediaChargedMicros, runAsSystemInTransaction } from "@rakazo/db";
 import { queuedMediaMicros } from "./media-queued.js";
 import type { ResolvedMediaSource } from "./media-sources.js";
 import { MEDIA_REFUSALS } from "./media-usage.prompt.js";
@@ -37,6 +37,7 @@ export async function priceMediaGeneration(
   provider: MediaGenerationProvider,
   spaceId: string,
   kind: "image" | "video",
+  tx?: Prisma.TransactionClient,
 ): Promise<{ charge: MediaCharge | null } | { error: string }> {
   const micros = kind === "video" ? provider.prices.videoMicros : provider.prices.imageMicros;
   if (micros <= 0) return { charge: null };
@@ -45,7 +46,14 @@ export async function priceMediaGeneration(
     select: { organizationId: true },
   });
   if (!space) return { error: MEDIA_REFUSALS.unavailable };
-  const balance = await mediaBalance(prisma, space.organizationId);
+  const readBalance = () => mediaBalance(prisma, space.organizationId);
+  const balance = tx
+    ? await runAsSystemInTransaction(
+        tx,
+        "reserve an organization’s hosted media allowance",
+        readBalance,
+      )
+    : await readBalance();
   if (!balance) return { charge: null };
   if (balance.trial) return { error: MEDIA_REFUSALS.trial };
   if (!balance.limitMicros) return { error: MEDIA_REFUSALS.noPlan };
@@ -59,13 +67,10 @@ export async function priceMediaGeneration(
  * with the owner's own connection is billed to them by its provider, so it is never priced,
  * refused or charged here.
  */
-export function hostedMediaPrice(
-  prisma: MediaPrisma & Pick<PrismaClient, "space">,
-  source: ResolvedMediaSource,
-  spaceId: string,
-) {
+export function hostedMediaPrice(source: ResolvedMediaSource, spaceId: string) {
   if (source.record.kind !== "hosted") return undefined;
-  return (kind: "image" | "video") => priceMediaGeneration(prisma, source.provider, spaceId, kind);
+  return (kind: "image" | "video", tx: Prisma.TransactionClient) =>
+    priceMediaGeneration(tx, source.provider, spaceId, kind, tx);
 }
 
 /** Which media the provider offers at a price one monthly balance can pay at least once. */
