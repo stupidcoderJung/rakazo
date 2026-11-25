@@ -1,6 +1,7 @@
 import type { AccountExportManifest, AccountExportRecord } from "@rakazo/contracts";
 import type { Prisma, PrismaClient } from "../database/client.js";
 import { runAsTenant } from "../database/row-security.js";
+import { pageVersionImages } from "../pages/page-images.js";
 
 const PAGE = 200;
 
@@ -11,7 +12,7 @@ export interface AccountExportSpace {
   /** In time order, parents before children, as the archive format requires. */
   records(): AsyncGenerator<AccountExportRecord>;
   /**
-   * Every artifact in `records()`, with where its bytes are stored. Read after `records()`, from
+   * Every artifact or picture in `records()`, with where its bytes are stored. Read after `records()`, from
    * what it wrote, so a file saved meanwhile cannot appear without its record.
    */
   artifacts(): AsyncGenerator<{ id: string; storageKey: string }>;
@@ -208,16 +209,53 @@ async function* spaceRecords(
         createdAt: iso(page.createdAt),
         updatedAt: iso(page.updatedAt),
       };
+      const writtenImages = new Set<string>();
       // A save landing after the page row was read stays out, so the archive matches its header.
       for (let version = 0; ; ) {
         const versions = await prisma.pageVersion.findMany({
           where: { pageId: page.id, version: { gt: version, lte: page.currentVersion } },
           orderBy: { version: "asc" },
           take: PAGE,
-          select: { id: true, version: true, title: true, source: true, createdAt: true },
+          select: {
+            id: true,
+            version: true,
+            title: true,
+            source: true,
+            images: true,
+            createdAt: true,
+          },
         });
-        for (const row of versions)
-          yield { type: "page_version", ...row, pageId: page.id, createdAt: iso(row.createdAt) };
+        for (const row of versions) {
+          const entries = Object.entries(pageVersionImages(row));
+          const pending = [...new Set(entries.map(([, id]) => id))].filter(
+            (id) => !writtenImages.has(id),
+          );
+          if (pending.length) {
+            const pictures = await prisma.pageImage.findMany({
+              where: { id: { in: pending }, pageId: page.id, spaceId },
+              orderBy: { id: "asc" },
+            });
+            for (const { spaceId: _space, storageKey, ...picture } of pictures) {
+              if (picture.mimeType !== "image/webp") continue;
+              writtenImages.add(picture.id);
+              written.artifacts.push({ id: picture.id, storageKey });
+              yield {
+                type: "page_image",
+                ...picture,
+                mimeType: picture.mimeType,
+                createdAt: iso(picture.createdAt),
+              };
+            }
+          }
+          const images = Object.fromEntries(entries.filter(([, id]) => writtenImages.has(id)));
+          yield {
+            type: "page_version",
+            ...row,
+            images: Object.keys(images).length ? images : undefined,
+            pageId: page.id,
+            createdAt: iso(row.createdAt),
+          };
+        }
         if (versions.length < PAGE) break;
         version = versions.at(-1)!.version;
       }

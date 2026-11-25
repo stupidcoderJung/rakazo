@@ -97,6 +97,7 @@ export * from "./mcp/mcp-server-removal.js";
 export * from "./mcp/mcp-server-tool.js";
 export * from "./mcp/mcp-transport.js";
 export * from "./mcp/remote-mcp.js";
+export { detectImageMimeType } from "./media/image-mime-type.js";
 export * from "./media/media-generation-factory.js";
 export * from "./media/media-generation-provider.js";
 export * from "./media/media-model-choices.js";
