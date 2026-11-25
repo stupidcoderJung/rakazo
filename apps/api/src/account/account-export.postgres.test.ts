@@ -18,6 +18,7 @@ import {
   masterKeysFromEnv,
   readAccountExport,
   runAsSystem,
+  savePageState,
 } from "@rakazo/db";
 import { unzipSync } from "fflate";
 import { Hono } from "hono";
@@ -491,6 +492,8 @@ describePostgres("account export (PostgreSQL)", () => {
           where: { pageId_version: { pageId: page.id, version: 2 } },
           data: { images: { hero: image.id } },
         });
+        await savePageState(tx, page, exporter, { checked: true });
+        await savePageState(tx, page, other, { otherReader: "private" });
       }),
     );
     const exportApp = new Hono();
@@ -569,7 +572,9 @@ describePostgres("account export (PostgreSQL)", () => {
                 `message ${record.seq} ${record.role} ${named(JSON.stringify(record.blocks))}`,
               ];
             case "page":
-              return [`page ${record.title} v${record.currentVersion} ${record.pinnedAt !== null}`];
+              return [
+                `page ${record.title} v${record.currentVersion} ${record.pinnedAt !== null} ${JSON.stringify(record.readerState)}`,
+              ];
             case "page_version":
               return [
                 `page version ${named(record.pageId)} v${record.version} ${record.source} ${Object.keys(record.images ?? {}).join(",")}`,
@@ -598,6 +603,8 @@ describePostgres("account export (PostgreSQL)", () => {
 
       const again = await download(importer);
       const imported = new Map(result.spaces.map((space) => [space.name, space.id]));
+      const savedPage = records(archive, ownedSpace).find((record) => record.type === "page");
+      expect(savedPage?.readerState).toEqual({ checked: true });
       expect(content(records(again, imported.get("Mine")!))).toEqual(
         content(records(archive, ownedSpace)),
       );

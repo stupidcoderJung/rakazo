@@ -1,7 +1,8 @@
 import type { AccountExportManifest, AccountExportRecord } from "@rakazo/contracts";
 import type { Prisma, PrismaClient } from "../database/client.js";
-import { runAsTenant } from "../database/row-security.js";
+import { runAsSystem, runAsTenant } from "../database/row-security.js";
 import { pageVersionImages } from "../pages/page-images.js";
+import { readPageState } from "../pages/page-reader-state.js";
 
 const PAGE = 200;
 
@@ -198,6 +199,9 @@ async function* spaceRecords(
       take: PAGE,
     });
     for (const page of pages) {
+      const readerState = await runAsSystem("export the page owner's saved values", () =>
+        readPageState(prisma, page.id, userId),
+      );
       yield {
         type: "page",
         id: page.id,
@@ -206,6 +210,7 @@ async function* spaceRecords(
         title: page.title,
         pinnedAt: isoOrNull(page.pinnedAt),
         currentVersion: page.currentVersion,
+        ...(Object.keys(readerState).length ? { readerState } : {}),
         createdAt: iso(page.createdAt),
         updatedAt: iso(page.updatedAt),
       };

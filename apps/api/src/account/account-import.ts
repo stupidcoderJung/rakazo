@@ -42,6 +42,7 @@ import {
   runAsSystem,
   runAsTenant,
   SpaceLimitError,
+  savePageState,
 } from "@rakazo/db";
 import { bestEffort, getLogger } from "@rakazo/logging";
 import { markExpectedFailure } from "@rakazo/logging/hono";
@@ -683,11 +684,12 @@ class AccountImporter implements ArchiveSink {
         await writeLine(space.messages, `${JSON.stringify(record)}\n`);
         return;
       }
-      case "page":
+      case "page": {
         space.pageVersions.set(record.id, 0);
+        const id = newId();
         await prisma.page.create({
           data: {
-            id: newId(),
+            id,
             spaceId,
             userId,
             botId: space.optional(record.botId),
@@ -699,7 +701,14 @@ class AccountImporter implements ArchiveSink {
             updatedAt: new Date(record.updatedAt),
           },
         });
+        const values = record.readerState;
+        if (values && Object.keys(values).length) {
+          await runAsSystem("restore saved values for the importing page owner", () =>
+            savePageState(prisma, { id, spaceId }, userId, values),
+          );
+        }
         return;
+      }
       case "page_version": {
         const newest = space.pageVersions.get(record.pageId);
         if (newest === undefined) throw missingRecord();

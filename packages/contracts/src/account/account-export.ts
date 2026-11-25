@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { PageStateSchema } from "../artifacts/page-reader-state.js";
 import { PageImagesSchema, PageSourceSchema, PageTitleSchema } from "../artifacts/pages.js";
 import { BotSchema } from "../bots/bot.js";
 import { BotAvatarSetSchema } from "../bots/bot-avatar.js";
@@ -133,6 +134,7 @@ export const AccountExportRecordSchema = z.discriminatedUnion("type", [
     title: PageTitleSchema,
     pinnedAt: IsoDate.nullable(),
     currentVersion: PageVersionNumber,
+    readerState: PageStateSchema.optional(),
     createdAt: IsoDate,
     updatedAt: IsoDate,
   }),
