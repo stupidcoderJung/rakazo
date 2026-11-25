@@ -1,9 +1,10 @@
+import { PAGE_STATE_MAX_BYTES, PAGE_STATE_MAX_KEYS } from "@rakazo/contracts";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 
 const STATE_MESSAGE = "rakazo-page:state";
 const SAVED_KEY = /^(?!__proto__$)[A-Za-z0-9_.:-]{1,64}$/;
 const SEND_DELAY_MS = 400;
-const SEND_MAX_KEYS = 100;
+const encoder = new TextEncoder();
 
 const values = new Map<string, unknown>();
 const listeners = new Set<() => void>();
@@ -20,11 +21,27 @@ function notify() {
 function send() {
   const entries = [...unsent];
   unsent.clear();
-  for (let start = 0; start < entries.length; start += SEND_MAX_KEYS) {
-    const batch = entries.slice(start, start + SEND_MAX_KEYS);
+  let batch: [string, unknown][] = [];
+  let bytes = 2;
+  const flush = () => {
+    if (!batch.length) return;
     for (const [key, value] of batch) inTransit.set(key, JSON.stringify(value));
     window.parent?.postMessage({ type: STATE_MESSAGE, values: Object.fromEntries(batch) }, "*");
+    batch = [];
+    bytes = 2;
+  };
+  for (const [key, value] of entries) {
+    const size = encoder.encode(`${JSON.stringify(key)}:${JSON.stringify(value)}`).byteLength;
+    if (size + 2 > PAGE_STATE_MAX_BYTES) continue;
+    if (
+      batch.length === PAGE_STATE_MAX_KEYS ||
+      bytes + (batch.length ? 1 : 0) + size > PAGE_STATE_MAX_BYTES
+    )
+      flush();
+    bytes += size + (batch.length ? 1 : 0);
+    batch.push([key, value]);
   }
+  flush();
 }
 
 function cooled() {

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { PageStateSchema } from "@rakazo/contracts";
 import { deferred } from "@rakazo/core/test-async";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -71,6 +72,41 @@ it("drains edits added before the page viewer unmounts", async () => {
   await drained;
 
   expect(write).toHaveBeenNthCalledWith(2, { pageId: "page-1", values: { b: 2 } });
+});
+
+it.each([
+  [
+    "count",
+    Object.fromEntries(Array.from({ length: 100 }, (_, index) => [`key${index}`, index])),
+    { next: true },
+  ],
+  ["bytes", { note: "가".repeat(12_000) }, { description: "나".repeat(12_000) }],
+])("keeps queued writes within the request %s limit", async (_, left, right) => {
+  const first = deferred<void>();
+  const writes: PageStateSave[] = [];
+  const write = async (save: PageStateSave) => {
+    writes.push(save);
+    if (writes.length === 1) await first.promise;
+    expect(PageStateSchema.safeParse(save.values).success).toBe(true);
+  };
+  let queue!: ReturnType<typeof usePageStateQueue>;
+  let drained!: Promise<void>;
+  function Queue() {
+    queue = usePageStateQueue("page-1", (save) => {
+      drained = queue.drain(save, write);
+    });
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  act(() => root.render(<Queue />));
+  queue.save({ initial: true });
+  queue.save(left);
+  queue.save(right);
+  first.resolve();
+  await drained;
+
+  expect(writes.map((save) => save.values)).toEqual([{ initial: true }, left, right]);
+  act(() => root.unmount());
 });
 
 it("adds saved values to a page read that carries the reader's values, and only to one", () => {

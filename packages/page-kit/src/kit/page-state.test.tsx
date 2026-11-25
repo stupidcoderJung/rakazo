@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { PageStateSchema } from "@rakazo/contracts";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -93,6 +94,26 @@ describe("usePageState", () => {
     expect(shown("liveNote")).toBe('"updated elsewhere"');
     expect(shown("liveCheck")).toBe("true");
     expect(posted).toHaveLength(1);
+  });
+
+  it("sends individually valid large values in separate messages", () => {
+    render([
+      ["startBatch", false],
+      ["longNote", ""],
+      ["longDescription", ""],
+    ]);
+    set("startBatch", true);
+    set("longNote", "가".repeat(12_000));
+    set("longDescription", "나".repeat(12_000));
+
+    vi.advanceTimersByTime(400);
+    expect(posted).toHaveLength(3);
+    expect(
+      posted.slice(1).map((message) => {
+        const { values } = message as { values: unknown };
+        return Object.keys(PageStateSchema.parse(values));
+      }),
+    ).toEqual([["longNote"], ["longDescription"]]);
   });
 
   it("sends a change at once, the burst after it as one save, and keeps unsavable keys in memory", () => {
