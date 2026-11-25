@@ -1,9 +1,11 @@
 import * as z from "zod";
-import { PageSourceSchema, PageTitleSchema } from "../artifacts/pages.js";
+import { PageStateSchema } from "../artifacts/page-reader-state.js";
+import { PageImagesSchema, PageSourceSchema, PageTitleSchema } from "../artifacts/pages.js";
 import { BotSchema } from "../bots/bot.js";
 import { BotAvatarSetSchema } from "../bots/bot-avatar.js";
 import { Id, IsoDate, ReplyModeSchema } from "../ids.js";
 import { RoutineSchema } from "../routines/routine.js";
+import { ATTACHMENT_IMAGE_MAX_EDGE, ATTACHMENT_MAX_BYTES } from "../threads/attachments.js";
 import { ThreadMessageSchema } from "../threads/thread-message.js";
 
 /**
@@ -12,7 +14,7 @@ import { ThreadMessageSchema } from "../threads/thread-message.js";
  * - `manifest.json` comes first: the format, version and the exported spaces.
  * - `spaces/<spaceId>/records.jsonl`: one `AccountExportRecord` per line. A record only refers to
  *   records earlier in the same file, except `bot.parentBotId`, which may point forward.
- * - `spaces/<spaceId>/artifacts/<artifactId>`: each artifact's bytes, after the records.
+ * - `spaces/<spaceId>/artifacts/<artifactId>`: each artifact or page picture's bytes, after the records.
  * - `spaces/<spaceId>/homes/<botId>/<path>`: each bot's workspace files, after the records.
  * - `spaces/<spaceId>/executables.json`: after the workspace files, which of them are executable
  *   (a streamed zip cannot carry file modes back out). Left out when none are.
@@ -132,6 +134,7 @@ export const AccountExportRecordSchema = z.discriminatedUnion("type", [
     title: PageTitleSchema,
     pinnedAt: IsoDate.nullable(),
     currentVersion: PageVersionNumber,
+    readerState: PageStateSchema.optional(),
     createdAt: IsoDate,
     updatedAt: IsoDate,
   }),
@@ -142,6 +145,18 @@ export const AccountExportRecordSchema = z.discriminatedUnion("type", [
     version: PageVersionNumber,
     title: PageTitleSchema,
     source: PageSourceSchema,
+    images: PageImagesSchema.optional(),
+    createdAt: IsoDate,
+  }),
+  z.object({
+    type: z.literal("page_image"),
+    id: Id,
+    pageId: Id,
+    mimeType: z.literal("image/webp"),
+    hash: z.string().regex(/^[a-f0-9]{64}$/),
+    width: z.number().int().positive().max(ATTACHMENT_IMAGE_MAX_EDGE),
+    height: z.number().int().positive().max(ATTACHMENT_IMAGE_MAX_EDGE),
+    size: z.number().int().positive().max(ATTACHMENT_MAX_BYTES),
     createdAt: IsoDate,
   }),
   z.object({
@@ -198,6 +213,7 @@ export const AccountExportRecordSchema = z.discriminatedUnion("type", [
     modelId: z.string().nullable(),
     thinkingLevel: z.string().nullable(),
     watch: json.nullable(),
+    endsAt: IsoDate.nullable().default(null),
     createdAt: IsoDate,
   }),
   z.object({

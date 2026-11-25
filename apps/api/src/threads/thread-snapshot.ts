@@ -6,11 +6,12 @@ import {
   projectMessages,
   runFailureError,
 } from "@rakazo/core";
-import type { PrismaClient } from "@rakazo/db";
+import type { Prisma, PrismaClient } from "@rakazo/db";
 import { botRunStatuses, spaceIsShared } from "@rakazo/db";
 import { resolveComputerWork, toComputerStatus } from "../computers/computer-status.js";
 import { THREAD_MESSAGE_PAGE_SIZE } from "../routes/shared.js";
 import { includePendingInputs, loadMessagePage } from "./thread-message-pages.js";
+import { findRetryableReplySource } from "./thread-retry.js";
 import type { ThreadTarget } from "./thread-target.js";
 
 export async function threadSnapshot(
@@ -124,7 +125,7 @@ export async function threadSnapshot(
         return {
           messagePage,
           last,
-          run: currentRun,
+          run: currentRun ? await mapRunWithRetryEligibility(tx, currentRun, viewerId) : null,
           activeRuns,
           liveEvents,
           shared,
@@ -140,7 +141,7 @@ export async function threadSnapshot(
       cursor: core.last?.seq ?? -1,
       messages: messagesWithLiveEvents(core.messagePage.messages, core.liveEvents, core.activeRuns),
       olderCursor: core.messagePage.olderCursor,
-      run: core.run ? mapRun(core.run) : null,
+      run: core.run,
       activeRuns: core.activeRuns.map(mapRun),
       computer: toComputerStatus(target.botId, core.computer, core.work, core.shared, viewerId),
     };
@@ -215,11 +216,20 @@ export async function threadSnapshot(
               orderBy: { seq: "asc" },
             })
           : [];
+      const terminalRun = pickLatestTerminalRun(recentTerminals);
       return {
         messagePage,
         last,
         activeRuns,
-        terminalRun: pickLatestTerminalRun(recentTerminals),
+        failedRun:
+          terminalRun?.status === "failed" &&
+          !activeRuns.some((run) => run.retryOfRunId === terminalRun.id)
+            ? await mapRunWithRetryEligibility(
+                tx,
+                terminalRun,
+                target.memberBotIds.includes(terminalRun.botId) ? viewerId : undefined,
+              )
+            : null,
         liveEvents,
         memberStatuses,
       };
@@ -240,12 +250,7 @@ export async function threadSnapshot(
     olderCursor: core.messagePage.olderCursor,
     // Match the live reducer: a failed latest terminal stays in run even while siblings are
     // still active or start late. A newer completed/cancelled terminal clears it.
-    run:
-      core.terminalRun?.status === "failed"
-        ? mapRun(core.terminalRun)
-        : primaryActiveRun
-          ? mapRun(primaryActiveRun)
-          : null,
+    run: core.failedRun ?? (primaryActiveRun ? mapRun(primaryActiveRun) : null),
     activeRuns: core.activeRuns.map(mapRun),
   };
 }
@@ -302,6 +307,18 @@ function messagesWithLiveEvents(
     );
   });
   return [...persisted, ...live];
+}
+
+async function mapRunWithRetryEligibility(
+  tx: Prisma.TransactionClient,
+  run: Parameters<typeof mapRun>[0] & { sourceMessageId: string | null },
+  viewerId: string | undefined,
+) {
+  const mapped = mapRun(run);
+  if (await findRetryableReplySource(tx, run, viewerId)) {
+    return { ...mapped, retryable: true };
+  }
+  return mapped;
 }
 
 function mapRun(run: {

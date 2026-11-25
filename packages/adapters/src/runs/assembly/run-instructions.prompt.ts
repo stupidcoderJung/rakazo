@@ -135,13 +135,6 @@ export function persistentComputerInstruction(options: {
   return `You have a persistent sandbox${capabilities}. This backend does not provide model-visible graphical control.${toolSentence}`;
 }
 
-/** Only where the desktop-protection guard checks shell commands. */
-export function desktopGuardShellInstruction(offeredToolNames: ReadonlySet<string>) {
-  if (!offeredToolNames.has("shell")) return undefined;
-  const write = offeredToolNames.has("write_file") ? "a script with write_file" : "a script file";
-  return `Shell commands must be literal: no \`$(...)\`, backticks, subshells, loops, or \`$\` variables, environment variables included. Otherwise write ${write} and run it with \`python3\` or \`bash\`.`;
-}
-
 export function dockerComputerToolInstruction(
   computerKind: string,
   disabled?: ReadonlySet<string>,
@@ -261,10 +254,10 @@ function scratchpadClause(disabled?: ReadonlySet<string>): string | undefined {
   if (pads.length === 0) return undefined;
   const schedules = [...SCHEDULE_TOOL_NAMES].some((name) => builtinOffered(disabled, name));
   if (pads.length === 3 && schedules) {
-    return "Use scratchpad_add / scratchpad_update / scratchpad_complete for open work that should outlive this turn (not reminders — those are schedule_*).";
+    return "Use scratchpad_add / scratchpad_update / scratchpad_complete for open work that should outlive this turn, such as waiting on someone, rather than memory (not reminders — those are schedule_*).";
   }
   const reminder = schedules ? " (not reminders — those are schedule_*)" : "";
-  return `Use ${pads.join(" / ")} for open work that should outlive this turn${reminder}.`;
+  return `Use ${pads.join(" / ")} for open work that should outlive this turn, such as waiting on someone, rather than memory${reminder}.`;
 }
 
 /**

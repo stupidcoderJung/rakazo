@@ -10,6 +10,7 @@ import type { AdapterContext } from "@rakazo/adapter-kit";
 import {
   carriedBotModelPin,
   carriedRoutineModelPin,
+  detectImageMimeType,
   normalizeWorkspacePath,
   ObjectStorageUnavailableError,
   resolveBotWorkspacePath,
@@ -41,6 +42,7 @@ import {
   runAsSystem,
   runAsTenant,
   SpaceLimitError,
+  savePageState,
 } from "@rakazo/db";
 import { bestEffort, getLogger } from "@rakazo/logging";
 import { markExpectedFailure } from "@rakazo/logging/hono";
@@ -308,7 +310,7 @@ export function remapIds(value: unknown, ids: ReadonlyMap<string, string>): unkn
 type RecordOf<T extends AccountExportRecord["type"]> = Extract<AccountExportRecord, { type: T }>;
 
 type PendingArtifact = {
-  record: RecordOf<"artifact">;
+  record: RecordOf<"artifact" | "page_image">;
   id: string;
   stored?: { storageKey: string; hash: string; size: number };
 };
@@ -682,11 +684,12 @@ class AccountImporter implements ArchiveSink {
         await writeLine(space.messages, `${JSON.stringify(record)}\n`);
         return;
       }
-      case "page":
+      case "page": {
         space.pageVersions.set(record.id, 0);
+        const id = newId();
         await prisma.page.create({
           data: {
-            id: newId(),
+            id,
             spaceId,
             userId,
             botId: space.optional(record.botId),
@@ -698,7 +701,14 @@ class AccountImporter implements ArchiveSink {
             updatedAt: new Date(record.updatedAt),
           },
         });
+        const values = record.readerState;
+        if (values && Object.keys(values).length) {
+          await runAsSystem("restore saved values for the importing page owner", () =>
+            savePageState(prisma, { id, spaceId }, userId, values),
+          );
+        }
         return;
+      }
       case "page_version": {
         const newest = space.pageVersions.get(record.pageId);
         if (newest === undefined) throw missingRecord();
@@ -707,6 +717,14 @@ class AccountImporter implements ArchiveSink {
         if (space.seenPageVersions.has(key)) throw unreadable();
         space.seenPageVersions.add(key);
         space.pageVersions.set(record.pageId, Math.max(newest, record.version));
+        const images = Object.fromEntries(
+          Object.entries(record.images ?? {}).map(([name, id]) => {
+            const picture = space.artifacts.get(id);
+            if (picture?.record.type !== "page_image" || picture.record.pageId !== record.pageId)
+              throw missingRecord();
+            return [name, picture.id];
+          }),
+        );
         // The checker tightens over time and is not the security boundary (the viewer's sandbox
         // is), so a version an older release saved still imports and opens on its own error.
         const check = checkPageSource(record.source);
@@ -718,11 +736,16 @@ class AccountImporter implements ArchiveSink {
             title: record.title,
             source: record.source,
             code: check.ok ? check.code : pageViewerCode(record.source),
+            ...(record.images ? { images } : {}),
             createdAt: new Date(record.createdAt),
           },
         });
         return;
       }
+      case "page_image":
+        if (!space.pageVersions.has(record.pageId)) throw missingRecord();
+        space.artifacts.set(record.id, { record, id: newId() });
+        return;
       case "artifact":
         space.artifacts.set(record.id, { record, id: newId() });
         if (record.rootArtifactId) space.mapped(record.rootArtifactId);
@@ -793,6 +816,7 @@ class AccountImporter implements ArchiveSink {
             messageProvider: record.messageProvider,
             ...carriedRoutineModelPin(record),
             watch: jsonValue(record.watch),
+            endsAt: record.endsAt ? new Date(record.endsAt) : null,
             createdAt: new Date(record.createdAt),
           },
         });
@@ -996,16 +1020,21 @@ class AccountImporter implements ArchiveSink {
     const space = this.current!;
     const artifact = space.artifacts.get(sourceId)!;
     const { record } = artifact;
-    const botId = space.optional(record.botId) ?? undefined;
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const picture = record.type === "page_image";
+    if (
+      picture &&
+      (hash !== record.hash ||
+        bytes.byteLength !== record.size ||
+        detectImageMimeType(bytes) !== record.mimeType)
+    )
+      throw unreadable();
+    const botId = picture ? undefined : (space.optional(record.botId) ?? undefined);
     const stored = await this.deps.artifacts.put(
-      { name: record.name, mimeType: record.mimeType, bytes },
+      { name: picture ? "page-picture.webp" : record.name, mimeType: record.mimeType, bytes },
       space.context(botId),
     );
-    artifact.stored = {
-      storageKey: stored.id,
-      hash: createHash("sha256").update(bytes).digest("hex"),
-      size: bytes.byteLength,
-    };
+    artifact.stored = { storageKey: stored.id, hash, size: bytes.byteLength };
   }
 
   private async stageHomeFile(sourceBotId: string, relativePath: string, bytes: Uint8Array) {
@@ -1058,6 +1087,22 @@ class AccountImporter implements ArchiveSink {
       for (const { record, id, stored } of space.artifacts.values()) {
         // The exporter skips files it could not read; their versions go with them.
         if (!stored) continue;
+        if (record.type === "page_image") {
+          const { pageId, createdAt, mimeType, width, height } = record;
+          await this.deps.prisma.pageImage.create({
+            data: {
+              id,
+              pageId: space.mapped(pageId),
+              spaceId: space.spaceId,
+              mimeType,
+              width,
+              height,
+              createdAt: new Date(createdAt),
+              ...stored,
+            },
+          });
+          continue;
+        }
         if (record.rootArtifactId && !kept.has(record.rootArtifactId)) {
           await this.deps.artifacts.remove(stored.storageKey, space.context());
           continue;

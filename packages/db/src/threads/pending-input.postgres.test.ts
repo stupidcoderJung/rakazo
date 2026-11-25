@@ -27,11 +27,7 @@ describePostgres("pending protected input (PostgreSQL)", () => {
     db = createDb(databaseUrl!);
     system = asSystem(db.prisma);
     const identity = await runAsSystem("pending input test fixture", () =>
-      provisionMessagingIdentity(
-        db.prisma,
-        { provider: "sendblue", address },
-        { signupsEnabled: undefined, signupAllowlist: undefined },
-      ),
+      provisionMessagingIdentity(db.prisma, { provider: "sendblue", address }),
     );
     const { userId, spaceId, botId, threadId } = identity;
     scope = { userId, spaceId, botId, threadId };
