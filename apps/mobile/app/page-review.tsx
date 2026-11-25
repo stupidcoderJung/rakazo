@@ -2,10 +2,16 @@ import { ph } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { PageSectionAnchor } from "@rakazo/contracts";
 import type { PageReviewSections } from "@rakazo/core";
-import { pageReviewContent, pageReviewSections, pageStateRequest } from "@rakazo/core";
+import {
+  pageReviewContent,
+  pageReviewSections,
+  pageStateReceived,
+  pageStateRefresh,
+  pageStateRequest,
+} from "@rakazo/core";
 import { queryOptions } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { SandboxedHtmlPreview } from "../components/media/sandboxed-html-preview";
 import { SettingsGroup, SettingsRow } from "../components/settings/settings-group";
@@ -56,6 +62,10 @@ function Review({ pageId }: { pageId: string }) {
     target: ACCOUNT_SETTINGS,
     read: read.queryKey,
   });
+  const hostMessage = useMemo(
+    () => (readerState && !stateSaver.syncing ? pageStateRefresh(readerState) : undefined),
+    [readerState, stateSaver.syncing],
+  );
   const apiBase = currentApiBase();
   const runtimeError = t`This page couldn't be shown.`;
   const document = useScreenQuery(
@@ -186,13 +196,17 @@ function Review({ pageId }: { pageId: string }) {
           <SandboxedHtmlPreview
             html={document.data}
             background={tokens.background}
+            hostMessage={hostMessage}
             onMessage={
               draftId
                 ? undefined
-                : (raw) => {
+                : (raw, answer) => {
                     const message = pageMessage(raw);
                     const values = readerState ? pageStateRequest(message) : null;
-                    if (values) stateSaver.save(values);
+                    if (values) {
+                      stateSaver.save(values);
+                      answer(pageStateReceived(values));
+                    }
                     const sections = pageReviewSections(message);
                     if (sections) setAnchors({ version: page.version, sections });
                   }

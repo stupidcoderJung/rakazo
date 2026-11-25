@@ -57,6 +57,7 @@ export function SandboxedHtmlViewer({
   title,
   className = "bg-white",
   previewScrollTop,
+  hostMessage,
   onFrameMessage,
 }: {
   html: string;
@@ -64,6 +65,8 @@ export function SandboxedHtmlViewer({
   className?: string;
   /** For a Page card, scroll the rendered document to match the card's native scroll position. */
   previewScrollTop?: number;
+  /** The current app state for this document, repeated when the document first reports its height. */
+  hostMessage?: object;
   /**
    * Messages the shown document sends up through the viewer shell; `answer` posts back down, and
    * `focused` says whether this frame holds the app's focus as the message arrives.
@@ -82,19 +85,27 @@ export function SandboxedHtmlViewer({
   useEffect(() => {
     if (previewScrollTop !== undefined) sendPreviewScroll(frame.current, previewScrollTop);
   }, [previewScrollTop]);
-  useEventListener(onFrameMessage || scrollable ? window : null, "message", (event) => {
-    // Only this viewer's own frame speaks for its document.
-    if (event.source !== frame.current?.contentWindow) return;
-    // A newly mounted document may have missed the last scroll message during navigation.
-    if (previewScrollTop !== undefined && event.data?.type === "rakazo-page:height") {
-      sendPreviewScroll(frame.current, previewScrollTop);
-    }
-    onFrameMessage?.(
-      event.data,
-      (message) => frame.current?.contentWindow?.postMessage(message, "*"),
-      document.activeElement === frame.current,
-    );
-  });
+  useEffect(() => {
+    if (hostMessage) frame.current?.contentWindow?.postMessage(hostMessage, "*");
+  }, [hostMessage]);
+  useEventListener(
+    onFrameMessage || scrollable || hostMessage ? window : null,
+    "message",
+    (event) => {
+      // Only this viewer's own frame speaks for its document.
+      if (event.source !== frame.current?.contentWindow) return;
+      // A newly mounted document may have missed the last scroll message during navigation.
+      if (event.data?.type === "rakazo-page:height") {
+        if (previewScrollTop !== undefined) sendPreviewScroll(frame.current, previewScrollTop);
+        if (hostMessage) frame.current?.contentWindow?.postMessage(hostMessage, "*");
+      }
+      onFrameMessage?.(
+        event.data,
+        (message) => frame.current?.contentWindow?.postMessage(message, "*"),
+        document.activeElement === frame.current,
+      );
+    },
+  );
   return (
     <iframe
       ref={frame}

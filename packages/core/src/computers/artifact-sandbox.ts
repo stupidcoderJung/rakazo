@@ -140,6 +140,14 @@ export function pageStateRequest(data: unknown): PageState | null {
   return valid.length > 0 && pageStateBytes(kept) <= PAGE_STATE_MAX_BYTES ? kept : null;
 }
 
+export function pageStateRefresh(values: PageState) {
+  return { type: "rakazo-page:state-refresh", values };
+}
+
+export function pageStateReceived(values: PageState) {
+  return { type: "rakazo-page:state-received", values };
+}
+
 /** The answer a page's copy button waits for. */
 export function pageCopyResult(id: string, ok: boolean) {
   return { type: "rakazo-page:copied", id, ok };

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { PageSectionAnchor } from "@rakazo/contracts";
+import type { PageSectionAnchor, PageState } from "@rakazo/contracts";
 import { deferred, flush } from "@rakazo/core/test-async";
 import type { ReactNode } from "react";
 import { act, createElement } from "react";
@@ -15,6 +15,8 @@ const host = vi.hoisted(() => ({
   routes: [] as { name: string; params?: object }[],
   went: [] as unknown[],
   html: "",
+  hostMessage: undefined as object | undefined,
+  refresh: undefined as (() => unknown) | undefined,
   runtimeFails: false,
   theme: "light",
   readError: null as unknown,
@@ -26,6 +28,8 @@ const host = vi.hoisted(() => ({
     id: "page-1",
     title: "Plan",
     code: "",
+    currentVersion: 1,
+    readerState: undefined as PageState | undefined,
     botId: "bot-1" as string | null,
     groupId: null as string | null,
   },
@@ -85,9 +89,18 @@ vi.mock("../../components/native/native-action-button", () => ({
     ),
 }));
 vi.mock("../../components/media/sandboxed-html-preview", () => ({
-  SandboxedHtmlPreview: ({ html, onMessage }: { html: string; onMessage: typeof host.message }) => {
+  SandboxedHtmlPreview: ({
+    html,
+    onMessage,
+    hostMessage,
+  }: {
+    html: string;
+    onMessage: typeof host.message;
+    hostMessage?: object;
+  }) => {
     host.html = html;
     host.message = onMessage;
+    host.hostMessage = hostMessage;
     return null;
   },
 }));
@@ -129,7 +142,11 @@ vi.mock("../navigation/screen-header", () => ({
     host.headerAction = action;
   },
 }));
-vi.mock("./page-review-reads", () => ({ usePageReviewSignals: () => {} }));
+vi.mock("./page-review-reads", () => ({
+  usePageReviewSignals: (refresh?: () => unknown, enabled = true) => {
+    host.refresh = enabled ? refresh : undefined;
+  },
+}));
 vi.mock("../../components/settings/settings-group", () => ({
   SettingsGroup: ({ children }: { children: ReactNode }) => children,
   SettingsRow: ({ title, onPress }: { title: string; onPress: () => void }) =>
@@ -176,6 +193,29 @@ const { takePageReply } = await import("./pages");
 /** A finger at `x`,`y` on the screen, as React Native reports a touch. */
 const at = (x: number, y: number, fingers = 1) => ({
   nativeEvent: { pageX: x, pageY: y, touches: Array.from({ length: fingers }) },
+});
+
+it("refreshes saved values in the open native page without replacing its document", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  host.page.readerState = { checked: false };
+  const root = createRoot(document.createElement("div"));
+  try {
+    await act(async () => root.render(createElement(PageScreen)));
+    const html = host.html;
+    expect(host.hostMessage).toMatchObject({ values: { checked: false } });
+
+    host.page.readerState = { checked: true };
+    await act(async () => host.refresh?.());
+    expect(host.html).toBe(html);
+    expect(host.hostMessage).toEqual({
+      type: "rakazo-page:state-refresh",
+      values: { checked: true },
+    });
+  } finally {
+    await act(async () => root.unmount());
+    host.page.readerState = undefined;
+    vi.unstubAllGlobals();
+  }
 });
 
 it("copies and opens links for a page only right after the person tapped it", async () => {

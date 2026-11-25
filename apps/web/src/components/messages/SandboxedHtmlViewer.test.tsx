@@ -34,9 +34,16 @@ async function render(html: string, previewScrollTop?: number) {
         iframe.dispatchEvent(new Event("load"));
       });
     },
-    async rerender(next: string, scrollTop?: number) {
+    async rerender(next: string, scrollTop?: number, hostMessage?: object) {
       await act(async () => {
-        root.render(<SandboxedHtmlViewer title="Notes" html={next} previewScrollTop={scrollTop} />);
+        root.render(
+          <SandboxedHtmlViewer
+            title="Notes"
+            html={next}
+            previewScrollTop={scrollTop}
+            hostMessage={hostMessage}
+          />,
+        );
       });
     },
     async cleanup() {
@@ -102,6 +109,30 @@ it("scrolls a Page card without replacing its sandboxed document", async () => {
   expect(view.postMessage.mock.calls).toEqual([
     [scroll, "*"],
     [scroll, "*"],
+  ]);
+  await view.cleanup();
+});
+
+it("delivers updated reader values without replacing the document", async () => {
+  const html = "<p>Notes</p>";
+  const view = await render(html);
+  await view.load();
+  view.postMessage.mockClear();
+
+  const refresh = { type: "rakazo-page:state-refresh", values: { note: "updated" } };
+  await view.rerender(html, undefined, refresh);
+  expect(view.postMessage.mock.calls).toEqual([[refresh, "*"]]);
+
+  const height = { type: "rakazo-page:height", height: 400 };
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent("message", { source: window, data: height }));
+    window.dispatchEvent(
+      new MessageEvent("message", { source: view.iframe.contentWindow, data: height }),
+    );
+  });
+  expect(view.postMessage.mock.calls).toEqual([
+    [refresh, "*"],
+    [refresh, "*"],
   ]);
   await view.cleanup();
 });

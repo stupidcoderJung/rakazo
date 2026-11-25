@@ -60,6 +60,41 @@ describe("usePageState", () => {
     expect(shown("count")).toBe("0");
   });
 
+  it("applies host refreshes without replacing local edits in transit or queued to send", () => {
+    startPageState({ liveNote: "initial", liveCheck: false, liveCount: 0 });
+    render([
+      ["liveNote", ""],
+      ["liveCheck", false],
+      ["liveCount", 0],
+    ]);
+    const hostMessage = (type: string, values: Record<string, unknown>) =>
+      act(() =>
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: window,
+            data: { type, values },
+          }),
+        ),
+      );
+
+    set("liveNote", "typed");
+    set("liveCheck", true);
+    hostMessage("rakazo-page:state-refresh", {
+      liveNote: "remote",
+      liveCheck: false,
+      liveCount: 1,
+    });
+    expect(shown("liveNote")).toBe('"typed"');
+    expect(shown("liveCheck")).toBe("true");
+    expect(shown("liveCount")).toBe("1");
+
+    hostMessage("rakazo-page:state-received", { liveNote: "typed" });
+    hostMessage("rakazo-page:state-refresh", { liveNote: "updated elsewhere", liveCount: 2 });
+    expect(shown("liveNote")).toBe('"updated elsewhere"');
+    expect(shown("liveCheck")).toBe("true");
+    expect(posted).toHaveLength(1);
+  });
+
   it("sends a change at once, the burst after it as one save, and keeps unsavable keys in memory", () => {
     render([
       ["note", ""],

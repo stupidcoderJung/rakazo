@@ -189,6 +189,7 @@ function OpenPage({
       composer={<div ref={setDockNode} />}
       onReply={session.offerReply}
       onSaveState={savedState ? readerState.save : undefined}
+      readerState={readerState.syncing ? undefined : savedState}
       share={
         data ? (
           <>

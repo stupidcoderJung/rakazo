@@ -1,5 +1,5 @@
 import { withSandboxedArtifactCsp } from "@rakazo/core";
-import { useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
 
@@ -31,6 +31,7 @@ export function SandboxedHtmlPreview({
   background = "white",
   scrollEnabled,
   onMessage,
+  hostMessage,
   appShell = false,
 }: {
   html: string;
@@ -44,11 +45,18 @@ export function SandboxedHtmlPreview({
   scrollEnabled?: boolean;
   /** A message the document posted; `answer` posts a reply back into the document. */
   onMessage?: (data: string, answer: (message: object) => void) => void;
+  hostMessage?: object;
 }) {
   const view = useRef<WebView<object>>(null);
   // JSON is a valid script literal for any message, so nothing in it can break out of the call.
-  const answer = (message: object) =>
-    view.current?.injectJavaScript(`window.postMessage(${JSON.stringify(message)}, "*");true;`);
+  const answer = useCallback(
+    (message: object) =>
+      view.current?.injectJavaScript(`window.postMessage(${JSON.stringify(message)}, "*");true;`),
+    [],
+  );
+  useEffect(() => {
+    if (hostMessage) answer(hostMessage);
+  }, [answer, hostMessage]);
   return (
     <View style={styles.container}>
       <WebView
@@ -60,6 +68,7 @@ export function SandboxedHtmlPreview({
           onMessage && !appShell ? FORWARD_WINDOW_MESSAGES : undefined
         }
         onMessage={(event) => onMessage?.(event.nativeEvent.data, answer)}
+        onLoadEnd={hostMessage ? () => answer(hostMessage) : undefined}
         javaScriptEnabled
         domStorageEnabled={false}
         allowFileAccess={false}

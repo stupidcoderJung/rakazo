@@ -2,19 +2,21 @@ import { useIsFocused } from "expo-router";
 import { useSpaceChanges } from "../api/roster-signals";
 import { queryClient } from "../query/query";
 
-export function usePageReviewSignals() {
+export function usePageReviewSignals(refresh?: () => unknown, enabled = true) {
   const focused = useIsFocused();
   useSpaceChanges(
     "pages",
-    () =>
-      queryClient.invalidateQueries({
+    () => {
+      refresh?.();
+      return queryClient.invalidateQueries({
         predicate: ({ queryKey }) =>
           queryKey.some(
             (key) =>
               typeof key === "string" &&
               (key.startsWith("pageReviews/") || key.startsWith("pages/")),
           ),
-      }),
-    focused,
+      });
+    },
+    focused && enabled,
   );
 }

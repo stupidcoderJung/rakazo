@@ -28,5 +28,5 @@ export function usePageStateSaver(pageId: string, read: QueryKey) {
     pageStateRetryable(saver.error);
   useEventListener(failed ? window : null, "focus", queue.retry);
   useEventListener(failed ? window : null, "online", queue.retry);
-  return { save: queue.save, failed };
+  return { save: queue.save, failed, syncing: saver.pending || failed };
 }

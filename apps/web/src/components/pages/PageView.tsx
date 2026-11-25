@@ -36,6 +36,7 @@ export function PageView({
   onReply,
   onSections,
   onSaveState,
+  readerState,
   returnFocus,
   compact = false,
   notice = null,
@@ -53,6 +54,7 @@ export function PageView({
   onReply?: (text: unknown) => void;
   onSections?: (sections: PageSectionAnchor[]) => void;
   onSaveState?: (values: PageState) => void;
+  readerState?: PageState;
   /** Puts focus back on close; false tells the dialog it is done. */
   returnFocus?: () => boolean;
   /** Touch screens get larger round controls. */
@@ -203,6 +205,7 @@ export function PageView({
                       onReply={onReply}
                       onSections={onSections}
                       onSaveState={onSaveState}
+                      readerState={readerState}
                       onHeight={onDrawn}
                     />
                   </div>

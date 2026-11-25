@@ -113,6 +113,7 @@ function ReviewPage({ pageId, onClose }: { pageId: string; onClose: () => void }
       title={page?.title ?? ""}
       document={preview.document}
       onSaveState={readerState ? stateSaver.save : undefined}
+      readerState={stateSaver.syncing ? undefined : readerState}
       onSections={
         page && !draftId ? (sections) => setAnchors({ version: page.version, sections }) : undefined
       }

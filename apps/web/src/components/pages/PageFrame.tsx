@@ -5,10 +5,12 @@ import {
   pageCopyResult,
   pageLinkRequest,
   pageReviewSections,
+  pageStateReceived,
+  pageStateRefresh,
   pageStateRequest,
 } from "@rakazo/core";
 import type { CSSProperties } from "react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { writeClipboard } from "../../lib/copy-text";
 import { pageFrameHeight } from "../../lib/pages/page-cards";
 import { SandboxedHtmlViewer } from "../messages/SandboxedHtmlViewer";
@@ -30,6 +32,7 @@ export function PageFrame({
   onReply,
   onSections,
   onSaveState,
+  readerState,
 }: {
   document: string;
   title: string;
@@ -41,12 +44,17 @@ export function PageFrame({
   onReply?: (text: unknown) => void;
   onSections?: (sections: PageSectionAnchor[]) => void;
   onSaveState?: (values: PageState) => void;
+  readerState?: PageState;
 }) {
   const { open, dialog } = useExternalLinkOpener();
   const box = useRef<HTMLDivElement>(null);
   const [drawnAt, setDrawnAt] = useState<CSSProperties | undefined>(undefined);
   const usedGesture = useRef<string | null>(null);
   const scrollablePreview = previewScrollTop !== undefined;
+  const hostMessage = useMemo(
+    () => (interactive && readerState ? pageStateRefresh(readerState) : undefined),
+    [interactive, readerState],
+  );
   const receive = useCallback(
     (data: unknown, answer: (message: object) => void, focused: boolean) => {
       if (!data || typeof data !== "object") return;
@@ -81,6 +89,7 @@ export function PageFrame({
       const values = interactive && onSaveState ? pageStateRequest(data) : null;
       if (values) {
         onSaveState?.(values);
+        answer(pageStateReceived(values));
         return;
       }
       const { gesture } = message;
@@ -109,6 +118,7 @@ export function PageFrame({
           title={title}
           className="bg-transparent"
           previewScrollTop={previewScrollTop}
+          hostMessage={hostMessage}
           onFrameMessage={receive}
         />
       </div>

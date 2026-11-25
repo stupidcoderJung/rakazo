@@ -9,6 +9,8 @@ const values = new Map<string, unknown>();
 const listeners = new Set<() => void>();
 let saving = false;
 const unsent = new Map<string, unknown>();
+const inTransit = new Map<string, string>();
+const persisted = new Set<string>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 function notify() {
@@ -19,8 +21,9 @@ function send() {
   const entries = [...unsent];
   unsent.clear();
   for (let start = 0; start < entries.length; start += SEND_MAX_KEYS) {
-    const values = Object.fromEntries(entries.slice(start, start + SEND_MAX_KEYS));
-    window.parent?.postMessage({ type: STATE_MESSAGE, values }, "*");
+    const batch = entries.slice(start, start + SEND_MAX_KEYS);
+    for (const [key, value] of batch) inTransit.set(key, JSON.stringify(value));
+    window.parent?.postMessage({ type: STATE_MESSAGE, values: Object.fromEntries(batch) }, "*");
   }
 }
 
@@ -31,21 +34,54 @@ function cooled() {
   timer = setTimeout(cooled, SEND_DELAY_MS);
 }
 
+function receiveState(event: MessageEvent) {
+  const { type, values: saved } = event.data ?? {};
+  if (event.source !== window.parent || !saved || typeof saved !== "object" || Array.isArray(saved))
+    return;
+  if (type === "rakazo-page:state-received") {
+    for (const [key, value] of Object.entries(saved)) {
+      if (inTransit.get(key) === asJsonText(value)) inTransit.delete(key);
+    }
+    return;
+  }
+  if (type !== "rakazo-page:state-refresh") return;
+
+  const editing = (key: string) => unsent.has(key) || inTransit.has(key);
+  let changed = false;
+  for (const key of persisted) {
+    if (Object.hasOwn(saved, key) || editing(key)) continue;
+    persisted.delete(key);
+    changed = values.delete(key) || changed;
+  }
+  for (const [key, value] of Object.entries(saved)) {
+    if (!SAVED_KEY.test(key) || editing(key)) continue;
+    persisted.add(key);
+    if (Object.is(value, values.get(key)) || asJsonText(value) === asJsonText(values.get(key)))
+      continue;
+    values.set(key, value);
+    changed = true;
+  }
+  if (changed) notify();
+}
+
 /** The values the host saved for this reader; without them the page saves nothing. */
 export function startPageState(saved: unknown) {
   if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
   saving = true;
-  for (const [key, value] of Object.entries(saved)) values.set(key, value);
+  for (const [key, value] of Object.entries(saved)) {
+    values.set(key, value);
+    persisted.add(key);
+  }
+  addEventListener("message", receiveState);
   addEventListener("pagehide", send);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") send();
   });
 }
 
-function asJson(value: unknown): unknown {
+function asJsonText(value: unknown): string | undefined {
   try {
-    const text = JSON.stringify(value);
-    return text === undefined ? undefined : JSON.parse(text);
+    return JSON.stringify(value);
   } catch {
     return undefined;
   }
@@ -55,9 +91,9 @@ function setValue(key: string, value: unknown) {
   values.set(key, value);
   notify();
   if (!saving || !SAVED_KEY.test(key)) return;
-  const saved = asJson(value);
+  const saved = asJsonText(value);
   if (saved === undefined) return;
-  unsent.set(key, saved);
+  unsent.set(key, JSON.parse(saved));
   if (timer !== undefined) return;
   send();
   timer = setTimeout(cooled, SEND_DELAY_MS);

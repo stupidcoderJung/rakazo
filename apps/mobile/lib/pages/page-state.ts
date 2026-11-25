@@ -10,7 +10,11 @@ import type { SettingsTarget } from "../query/settings-target";
 export function usePageStateSaver(
   pageId: string,
   /** `read` is the page read kept showing what was saved. */
-  options: { target?: SettingsTarget; read?: QueryKey } = {},
+  options: {
+    target?: SettingsTarget;
+    read?: QueryKey;
+    onSaved?: (save: PageStateSave) => void;
+  } = {},
 ) {
   const queue = usePageStateQueue(pageId, (save) => saver.run(save));
   const saver = useSave({
@@ -24,6 +28,7 @@ export function usePageStateSaver(
             withSavedValues(cached, save.values),
           );
         }
+        options.onSaved?.(save);
       }),
     onSaved: (_, input) => queue.finished(input),
     onFailed: (error, input) => queue.finished(input, error),
@@ -35,12 +40,10 @@ export function usePageStateSaver(
     if (foreground && !wasForeground.current) retry();
     wasForeground.current = foreground;
   }, [foreground, retry]);
-  return {
-    save: queue.save,
-    failed:
-      saver.error !== null &&
-      !saver.pending &&
-      saver.input?.pageId === pageId &&
-      pageStateRetryable(saver.error),
-  };
+  const failed =
+    saver.error !== null &&
+    !saver.pending &&
+    saver.input?.pageId === pageId &&
+    pageStateRetryable(saver.error);
+  return { save: queue.save, failed, syncing: saver.pending || failed };
 }

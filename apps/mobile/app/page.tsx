@@ -6,12 +6,15 @@ import {
   pageCopyResult,
   pageLinkRequest,
   pageReplyText,
+  pageStateReceived,
+  pageStateRefresh,
   pageStateRequest,
 } from "@rakazo/core";
+import { bestEffort } from "@rakazo/logging/best-effort";
 import { webTokensForAppearance } from "@rakazo/ui-tokens";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SandboxedHtmlPreview } from "../components/media/sandboxed-html-preview";
@@ -20,6 +23,7 @@ import { currentApiBase } from "../lib/api/api";
 import { useMobileTokens, useResolvedAppearance } from "../lib/native/native";
 import { HEADER_CONTROL_SIZE } from "../lib/native/native-controls";
 import { PageLoadFailure } from "../lib/pages/page-load-failure";
+import { usePageReviewSignals } from "../lib/pages/page-review-reads";
 import { usePageStateSaver } from "../lib/pages/page-state";
 import {
   getLatestPage,
@@ -49,6 +53,7 @@ export default function PageScreen() {
   const pageBackground = webTokensForAppearance(theme).background;
   const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const refreshNumber = useRef(0);
   const focusedOnce = useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -91,15 +96,51 @@ export default function PageScreen() {
   // and the page can't fake one.
   const tapStart = useRef<ReturnType<typeof pageTapStart>>(null);
   const tappedAt = useRef<number | null>(null);
-  const stateSaver = usePageStateSaver(pageId);
+  const stateSaver = usePageStateSaver(pageId, {
+    onSaved: (save) => {
+      setLoaded((current) =>
+        current.status === "ready" && current.page.id === save.pageId && current.page.readerState
+          ? {
+              ...current,
+              page: {
+                ...current.page,
+                readerState: { ...current.page.readerState, ...save.values },
+              },
+            }
+          : current,
+      );
+    },
+  });
   // A page still on screen while another loads saves nothing under the new page.
-  const saving =
-    loaded.status === "ready" && loaded.page.id === pageId && loaded.page.readerState !== undefined;
+  const readerState =
+    loaded.status === "ready" && loaded.page.id === pageId ? loaded.page.readerState : undefined;
+  const saving = readerState !== undefined;
+  usePageReviewSignals(() => {
+    const refresh = ++refreshNumber.current;
+    return bestEffort(
+      "refresh the open page's saved values",
+      getLatestPage(pageId, { refresh: true }).then((page) => {
+        if (refresh !== refreshNumber.current) return;
+        setLoaded((current) =>
+          current.status === "ready" &&
+          current.page.id === page.id &&
+          current.page.currentVersion === page.currentVersion
+            ? { ...current, page }
+            : current,
+        );
+      }),
+    );
+  }, saving);
+  const hostMessage = useMemo(
+    () => (readerState && !stateSaver.syncing ? pageStateRefresh(readerState) : undefined),
+    [readerState, stateSaver.syncing],
+  );
   const receive = useCallback(
     (data: string, answer: (message: object) => void) => {
       const values = saving ? pageStateRequest(pageMessage(data)) : null;
       if (values) {
         stateSaver.save(values);
+        answer(pageStateReceived(values));
         return;
       }
       if (!pageActionAllowed(tappedAt.current, Date.now())) return;
@@ -158,6 +199,7 @@ export default function PageScreen() {
           <SandboxedHtmlPreview
             html={loaded.document}
             background={pageBackground}
+            hostMessage={hostMessage}
             onMessage={receive}
           />
         </View>
