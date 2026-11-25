@@ -123,6 +123,48 @@ afterEach(() => {
 });
 
 describe("acpAgentRuntime", () => {
+  it("sends recent and current images without resending the source message", async () => {
+    const runtime = acpAgentRuntime(fallback, descriptor(), { accessCheck: allowed });
+    const recent = { name: "earlier.png", mimeType: "image/png", data: Uint8Array.of(1) } as const;
+    const current = { name: "current.png", mimeType: "image/png", data: Uint8Array.of(2) } as const;
+    const { error } = await collect(
+      runtime,
+      request({
+        sourceMessageId: "current",
+        history: [
+          { id: "earlier", role: "user", content: "", images: [recent] },
+          { id: "current", role: "user", content: "hello", images: [current] },
+        ],
+        currentTurnImages: [current],
+      }),
+    );
+
+    expect(error).toBeUndefined();
+    expect(requests("session/prompt")[0]?.params).toMatchObject({
+      prompt: [
+        { type: "text" },
+        { type: "image", data: "AQ==", mimeType: "image/png" },
+        { type: "text", text: "hello" },
+        { type: "image", data: "Ag==", mimeType: "image/png" },
+      ],
+    });
+  });
+
+  it("records the usage returned after stopping a pending prompt", async () => {
+    const runtime = acpAgentRuntime(fallback, descriptor(), { accessCheck: allowed });
+    const onUsage = vi.fn(async () => {});
+    const input = request({ prompt: "stop me", onUsage });
+    const result = collect(runtime, input);
+
+    await vi.waitFor(() => expect(requests("session/prompt")).toHaveLength(1));
+    await runtime.abort(input.runId);
+
+    expect((await result).error).toBeUndefined();
+    expect(onUsage).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ inputTokens: 11, outputTokens: 2, totalTokens: 13 }),
+    );
+  });
+
   it("runs a Rakazo tool the agent calls and streams its reply", async () => {
     const runtime = acpAgentRuntime(fallback, descriptor(), { accessCheck: allowed });
     const input = request({ prompt: "What is the weather?" });

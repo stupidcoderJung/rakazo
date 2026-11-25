@@ -142,6 +142,13 @@ async function prompt(params) {
       usage: { inputTokens: 120, outputTokens: 8, totalTokens: 128 },
     };
   }
+  if (text === "stop me") {
+    await cancelled;
+    return {
+      stopReason: "cancelled",
+      usage: { inputTokens: 11, outputTokens: 2, totalTokens: 13 },
+    };
+  }
   if (text.includes("note")) {
     const result = await callTool(sessionId, "send_note", { text: "hi" });
     record({ type: "tool_result", result });

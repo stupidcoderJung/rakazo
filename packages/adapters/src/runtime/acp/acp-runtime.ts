@@ -19,6 +19,7 @@ import { cliEnv, privateFolder } from "../../cli-models/cli-process.js";
 import type { PersonalCliAccessCheck } from "../../cli-models/personal-access.js";
 import { deliverFinishedShells } from "../../computers/sandbox/shell-command-stream.js";
 import { sanitizeSensitiveText } from "../pi/pi-runtime-errors.js";
+import { toPiImages } from "../pi/pi-runtime-history.js";
 import { modelStreamIdleTimeoutMs } from "../pi/pi-runtime-limits.js";
 import { createRuntimeModels } from "../pi/pi-runtime-models.js";
 import { COMPUTER_MODE_TOOLS } from "../pi/tools/pi-runtime-computer-mode.js";
@@ -81,6 +82,7 @@ const agentFolder = privateFolder("rakazo-agent-cli", false);
 let toolHostModels: Models | undefined;
 
 type Update = Record<string, unknown>;
+type PromptBlock = { type: "text"; text: string } | ReturnType<typeof toPiImages>[number];
 
 interface AcpAgentRuntimeOptions {
   accessCheck?: PersonalCliAccessCheck;
@@ -477,30 +479,37 @@ async function runAcpTurn(
       replies: new Set(),
       usedAt: Date.now(),
     };
-    const promptText = turnText(request, current, fresh, includeOwnReplies);
+    const prompt = turnPrompt(request, current, fresh, includeOwnReplies);
+    const promptCapabilities = (capabilities.promptCapabilities ?? {}) as Update;
+    if (prompt.some((block) => block.type === "image") && promptCapabilities.image !== true) {
+      throw new Error(`${descriptor.label} does not accept image attachments.`);
+    }
     current.usedAt = Date.now();
     if (ownsChatSession) {
       keepSession(key, current);
       cachedSession = true;
     }
 
-    const send = async (text: string) => {
-      const prompting = agent.request<Update>("session/prompt", {
-        sessionId: activeSessionId,
-        prompt: [{ type: "text", text }],
-      });
+    const send = async (content: PromptBlock[]) => {
+      const prompting = agent
+        .request<Update>("session/prompt", { sessionId: activeSessionId, prompt: content })
+        .catch((error: unknown) => {
+          inFlight = undefined;
+          throw error;
+        });
       inFlight = prompting;
       sentPrompt = true;
       try {
-        return await step(prompting);
+        const result = await step(prompting);
+        inFlight = undefined;
+        return result;
       } catch (error) {
+        // An abort can end the wait before the prompt settles. Cleanup still owns that result.
         if (violation) throw violation;
         throw error;
-      } finally {
-        if (inFlight === prompting) inFlight = undefined;
       }
     };
-    let response = await send(promptText);
+    let response = await send(prompt);
     // Shell commands still running when the CLI ended its turn report back, as between steps.
     while (!violation && !cancelled && host.pendingShells.length) {
       let finished: string | undefined;
@@ -515,7 +524,7 @@ async function runAcpTurn(
       if (!finished) break;
       await reportUsage(request, descriptor, response.usage, push);
       afterTool = true;
-      response = await send(finished);
+      response = await send([{ type: "text", text: finished }]);
     }
     if (violation) throw violation;
     const stopReason = response.stopReason;
@@ -740,17 +749,18 @@ function flattenValues(options: unknown): string[] {
  * This turn's message: the chat the session has not seen, then the new message. A new session
  * gets the newest part of the chat that fits; a continued one only what others wrote since.
  */
-function turnText(
+function turnPrompt(
   request: AgentRunRequest,
   session: AgentSession,
   fresh: boolean,
   includeOwn: boolean,
-): string {
-  const lines: string[] = [];
+): PromptBlock[] {
+  const lines: Array<{ text: string; images: AgentRunRequest["currentTurnImages"] }> = [];
   for (const item of request.history) {
     const content = item.content.trim();
     // The new message itself goes last, as the prompt.
-    if (!content || (item.id && item.id === request.sourceMessageId)) continue;
+    if ((!content && !item.images?.length) || (item.id && item.id === request.sourceMessageId))
+      continue;
     const own = item.role === "assistant" && !item.speaker;
     if (item.id) {
       if (session.seen.has(item.id)) continue;
@@ -764,7 +774,7 @@ function turnText(
     }
     const speaker =
       item.speaker ?? (own ? OWN_SPEAKER : item.role === "system" ? "Note" : PERSON_SPEAKER);
-    lines.push(historyLine(speaker, content));
+    lines.push({ text: historyLine(speaker, content), images: item.images });
   }
   if (request.sourceMessageId) session.seen.add(request.sourceMessageId);
   // As with ids: only summaries and recall still in this turn's history can come up again.
@@ -782,18 +792,35 @@ function turnText(
     // The newest messages that fit; the newest one is kept, shortened, even when it alone does not.
     let size = 0;
     const start = lines.findLastIndex((line) => {
-      size += line.length;
+      size += line.text.length;
       return size > SEED_CHARS;
     });
     kept =
       start >= 0 && start === lines.length - 1
-        ? [`…${lines[start]!.slice(-SEED_CHARS)}`]
+        ? [{ ...lines[start]!, text: `…${lines[start]!.text.slice(-SEED_CHARS)}` }]
         : lines.slice(start + 1);
   }
   const message = request.promptSpeaker
     ? historyLine(request.promptSpeaker, request.prompt)
     : request.prompt;
-  return [conversationBlock(kept, fresh), message].filter(Boolean).join("\n\n");
+  const history = conversationBlock(
+    kept.map((line) => line.text),
+    fresh,
+  );
+  const historyImages = kept.flatMap((line) => toPiImages(line.images));
+  const currentImages = toPiImages(request.currentTurnImages);
+  if (!historyImages.length) {
+    return [
+      { type: "text", text: [history, message].filter(Boolean).join("\n\n") },
+      ...currentImages,
+    ];
+  }
+  return [
+    { type: "text", text: history },
+    ...historyImages,
+    { type: "text", text: message },
+    ...currentImages,
+  ];
 }
 
 /** Usage is reported only when the CLI gives it; the plan pays, so its cost is unknown. */
