@@ -13,7 +13,7 @@ for (const dockerfile of [
     const installCommands = runtime
       .replace(/\\\r?\n/g, " ")
       .match(/\bapt-get install\b[^&;\r\n]*/g);
-    for (const pkg of ["fontconfig", "fonts-dejavu-core"]) {
+    for (const pkg of ["fontconfig-config", "fonts-dejavu-core"]) {
       assert.ok(
         installCommands?.some((command) => command.split(/\s+/).includes(pkg)),
         pkg,
