@@ -85,7 +85,9 @@ COPY infra/sandboxes/computer/apt-security.sh /tmp/apt-security.sh
 RUN /tmp/apt-security.sh
 # Prisma's migration engine detects and links against OpenSSL. A stdio MCP server that runs on
 # another machine is launched over ssh, which the slim base image does not ship.
-RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends openssl libfido2-1 libedit2 libgssapi-krb5-2 \
+# The server rasterizes plot labels with Fontconfig and needs an installed font.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+  && apt-get install -y --no-install-recommends openssl libfido2-1 libedit2 libgssapi-krb5-2 fontconfig fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=ssh-client /client/ /
 RUN ssh -V && ssh -G localhost >/dev/null

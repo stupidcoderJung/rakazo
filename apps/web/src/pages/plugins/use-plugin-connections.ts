@@ -125,7 +125,8 @@ export function usePluginConnections({
     }),
   );
   const tools = (detailKey && toolsQuery.data) || [];
-  const toolsLoading = detailKey !== null && toolsQuery.isPending && toolsQuery.isFetching;
+  const toolsLoading = Boolean(detailKey) && toolsQuery.isLoading;
+  const toolsFailed = Boolean(detailKey) && toolsQuery.isError;
 
   function updateIntegrations(
     update: (
@@ -330,6 +331,7 @@ export function usePluginConnections({
     loadError,
     tools,
     toolsLoading,
+    toolsFailed,
     updateIntegrations,
     refresh,
     labelDrafts,
