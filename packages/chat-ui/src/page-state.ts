@@ -27,37 +27,51 @@ export function withSavedValues<T extends { readerState?: PageState }>(
 export function usePageStateQueue(pageId: string, run: (save: PageStateSave) => void) {
   const send = useRef(run);
   send.current = run;
-  const queued = useRef<PageStateSave | null>(null);
+  const queued = useRef(new Map<string, PageState>());
   const sending = useRef(false);
   const shown = useRef(pageId);
   shown.current = pageId;
+  const take = useCallback((id: string): PageStateSave | undefined => {
+    const values = queued.current.get(id);
+    if (!values) return;
+    queued.current.delete(id);
+    return { pageId: id, values };
+  }, []);
   const next = useCallback(() => {
-    const save = queued.current;
-    if (sending.current || !save || save.pageId !== shown.current) return;
-    queued.current = null;
+    if (sending.current) return;
+    const save = take(shown.current);
+    if (!save) return;
     sending.current = true;
     send.current(save);
-  }, []);
-  // Coming back to a page sends what was waiting behind a save another page finished.
+  }, [take]);
   useEffect(() => next(), [pageId, next]);
   return {
     save(values: PageState) {
-      const earlier = queued.current?.pageId === pageId ? queued.current.values : {};
-      queued.current = { pageId, values: { ...earlier, ...values } };
+      queued.current.set(pageId, { ...queued.current.get(pageId), ...values });
       next();
     },
-    saved() {
-      sending.current = false;
-      next();
-    },
-    failed(save: PageStateSave, error: unknown) {
-      sending.current = false;
-      if (!pageStateRetryable(error) || save.pageId !== shown.current) {
-        next();
-        return;
+    async drain(first: PageStateSave, write: (save: PageStateSave) => Promise<void>) {
+      let save: PageStateSave | undefined = first;
+      while (save) {
+        try {
+          await write(save);
+        } catch (error) {
+          if (pageStateRetryable(error)) {
+            queued.current.set(save.pageId, {
+              ...save.values,
+              ...queued.current.get(save.pageId),
+            });
+            throw error;
+          }
+          if (!queued.current.has(save.pageId)) throw error;
+        }
+        // The save owns its page and scoped RPC even after the viewer closes.
+        save = take(first.pageId);
       }
-      const later = queued.current?.pageId === save.pageId ? queued.current.values : {};
-      queued.current = { pageId: save.pageId, values: { ...save.values, ...later } };
+    },
+    finished(save: PageStateSave, error?: Error) {
+      sending.current = false;
+      if (!error || !pageStateRetryable(error) || save.pageId !== shown.current) next();
     },
     retry: next,
   };

@@ -11,14 +11,15 @@ export function usePageStateSaver(pageId: string, read: QueryKey) {
   const queryClient = useQueryClient();
   const queue = usePageStateQueue(pageId, (save) => saver.run(save));
   const saver = useSave({
-    save: (input: PageStateSave, rpc) => rpc.pageReviews.saveState(input),
-    onSaved: (_, input) => {
-      queryClient.setQueryData<{ readerState?: PageState }>(read, (cached) =>
-        withSavedValues(cached, input.values),
-      );
-      queue.saved();
-    },
-    onFailed: (error, input) => queue.failed(input, error),
+    save: (input: PageStateSave, rpc) =>
+      queue.drain(input, async (save) => {
+        await rpc.pageReviews.saveState(save);
+        queryClient.setQueryData<{ readerState?: PageState }>(read, (cached) =>
+          withSavedValues(cached, save.values),
+        );
+      }),
+    onSaved: (_, input) => queue.finished(input),
+    onFailed: (error, input) => queue.finished(input, error),
   });
   const failed =
     saver.error !== null &&

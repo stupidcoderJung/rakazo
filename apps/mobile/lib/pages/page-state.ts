@@ -15,17 +15,18 @@ export function usePageStateSaver(
   const queue = usePageStateQueue(pageId, (save) => saver.run(save));
   const saver = useSave({
     target: options.target,
-    save: (input: PageStateSave, send) => send("pageReviews/saveState", input),
-    onSaved: (_, input) => {
-      const { read } = options;
-      if (read) {
-        queryClient.setQueryData<{ readerState?: PageState }>(read, (cached) =>
-          withSavedValues(cached, input.values),
-        );
-      }
-      queue.saved();
-    },
-    onFailed: (error, input) => queue.failed(input, error),
+    save: (input: PageStateSave, send) =>
+      queue.drain(input, async (save) => {
+        await send("pageReviews/saveState", save);
+        const { read } = options;
+        if (read) {
+          queryClient.setQueryData<{ readerState?: PageState }>(read, (cached) =>
+            withSavedValues(cached, save.values),
+          );
+        }
+      }),
+    onSaved: (_, input) => queue.finished(input),
+    onFailed: (error, input) => queue.finished(input, error),
   });
   const foreground = useAppForeground();
   const wasForeground = useRef(foreground);
