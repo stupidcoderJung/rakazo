@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { savePageReaderState } from "./page-collaboration.js";
 import { getPage, listPages, removePage, setPageVisibility } from "./pages.js";
 
 type Row = { id: string; title: string; visibility: string; shareSecretId: string | null };
@@ -227,4 +228,47 @@ describe("page title search", () => {
       userId: "user-1",
     });
   });
+});
+
+it("signals only the saving reader once their page values commit", async () => {
+  let committed = false;
+  const tx = {
+    $queryRaw: vi.fn(),
+    page: {
+      findFirst: async () => ({
+        id: "page-1",
+        userId: "owner",
+        spaceId: "owner-space",
+        visibility: "people",
+        grants: [{ id: "grant-1", firstVersion: 1 }],
+      }),
+    },
+    pageReaderState: {
+      findUnique: async () => null,
+      create: vi.fn(),
+    },
+  };
+  const prisma = {
+    $transaction: async (work: (client: typeof tx) => Promise<unknown>) => {
+      const value = await work(tx);
+      committed = true;
+      return value;
+    },
+  };
+  const publishSpaceChange = vi.fn(async () => {
+    expect(committed).toBe(true);
+  });
+  await savePageReaderState(
+    { prisma, events: { publishSpaceChange } } as never,
+    {
+      userId: "reader",
+      spaceId: "reader-space",
+      email: "reader@rakazo.test",
+      isDeploymentOwner: false,
+    },
+    "page-1",
+    { checked: true },
+  );
+
+  expect(publishSpaceChange).toHaveBeenCalledExactlyOnceWith("pages:reader", "pages");
 });

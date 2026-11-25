@@ -346,8 +346,10 @@ async function savePage(ctx: RunContext, call: ToolCall) {
     call.nextApprovedTool !== "save_page" &&
     !(await neverAsks(ctx));
   let saved: { pageId: string; version: number; title: string };
+  let writesFinished = false;
   try {
     const { kept: keptFiles, ...committed } = await deps.prisma.$transaction(async (tx) => {
+      writesFinished = false;
       if (!page) {
         const created = await tx.page.create({
           data: {
@@ -365,6 +367,7 @@ async function savePage(ctx: RunContext, call: ToolCall) {
             where: { pageId: created.id, version: 1 },
             data: { images: stored.images },
           });
+        writesFinished = true;
         return { pageId: created.id, version: 1, title: created.title, kept: stored.kept };
       }
       const version = page.currentVersion + 1;
@@ -405,13 +408,16 @@ async function savePage(ctx: RunContext, call: ToolCall) {
       await tx.pageVersion.create({
         data: { pageId: page.id, version, title: nextTitle, source, code: check.code, images },
       });
+      writesFinished = true;
       return { pageId: page.id, version, title: nextTitle, kept: keptImages };
     });
     saved = committed;
     await discard(keptFiles);
   } catch (error) {
-    await discard([]);
-    if (error instanceof PageChangedError || isUniqueViolation(error)) {
+    const conflict = error instanceof PageChangedError || isUniqueViolation(error);
+    // Once the writes finish, a lost commit acknowledgement can leave the page referencing these files.
+    if (!writesFinished || conflict) await discard([]);
+    if (conflict) {
       return { error: "The page changed while saving; read it again and retry.", unchanged: true };
     }
     throw error;

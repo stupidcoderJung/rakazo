@@ -144,7 +144,7 @@ export function getPageReview(
 }
 
 export async function savePageReaderState(
-  prisma: PrismaClient,
+  { prisma, events }: Dependencies,
   actor: Actor,
   pageId: string,
   values: PageState,
@@ -152,6 +152,7 @@ export async function savePageReaderState(
   await writePageReview(prisma, actor, pageId, (tx, { page }) =>
     savePageState(tx, page, actor.userId, values),
   );
+  await signalPageUsers(events, [actor.userId]);
   return { ok: true as const };
 }
 

@@ -456,6 +456,31 @@ describe("saving a page's pictures", () => {
     expect(deps.artifacts.remove).toHaveBeenCalledWith("object:picture", expect.anything());
   });
 
+  it("keeps the picture when the database loses the commit acknowledgement", async () => {
+    const tx = {
+      page: { create: async () => ({ id: "page-1", title: "Trip", spaceId: "space-1" }) },
+      pageImage: { findUnique: async () => null, create: async () => ({ id: "image-1" }) },
+      pageVersion: { updateMany: vi.fn() },
+    };
+    const ctx = withFiles(context(tx), { storageKey: "object:1" }, await png());
+    const { prisma, artifacts } = (ctx as RunContext).deps;
+    Object.assign(prisma, {
+      $transaction: async (write: (client: typeof tx) => Promise<unknown>) => {
+        await write(tx);
+        throw new Error("commit acknowledgement lost");
+      },
+    });
+
+    await expect(
+      pageTools.save_page!(
+        ctx,
+        call({ title: "Trip", source: pictured("hotel"), images: { hotel: "artifact-1" } }),
+      ),
+    ).rejects.toThrow("commit acknowledgement lost");
+    expect(tx.pageVersion.updateMany).toHaveBeenCalledTimes(1);
+    expect(artifacts?.remove).not.toHaveBeenCalled();
+  });
+
   it("refuses a web picture from a site this run was not given, and saves nothing", async () => {
     const tx = { page: { create: vi.fn() } };
     const ctx = withFiles(context(tx), null);

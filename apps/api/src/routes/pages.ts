@@ -74,7 +74,7 @@ export function pagesRoutes(ctx: RouterContext) {
         publishPageDraft(deps, context.actor, input),
       ),
       saveState: authed.pageReviews.saveState.handler(({ context, input }) =>
-        savePageReaderState(deps.prisma, context.actor, input.pageId, input.values),
+        savePageReaderState(deps, context.actor, input.pageId, input.values),
       ),
       image: authed.pageReviews.image.handler(({ context, input }) =>
         getPageImage(deps, context.actor, input),
