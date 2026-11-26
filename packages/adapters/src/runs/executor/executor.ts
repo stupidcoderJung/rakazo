@@ -39,6 +39,24 @@ export function createRunExecutor(executorDeps: ExecutorDeps) {
   // but not its run, so the session side owns the lifetime: the connector ends
   // it when this worker observes the run's end, and bounds the rest itself.
   const endRunConnectorState = (runId: string) => executorDeps.connector?.endRun?.(runId);
+  const callbackDeps = {
+    prisma: executorDeps.prisma,
+    jobs: executorDeps.jobs,
+    rootKey: executorDeps.taskCallbackRootKey,
+  };
+  async function promptPausedTaskCallback(runId: string) {
+    if (!callbackDeps.rootKey) return;
+    await bestEffort(
+      "prompt paused task callback",
+      (async () => {
+        const run = await executorDeps.prisma.run.findUnique({
+          where: { id: runId },
+          select: { taskId: true },
+        });
+        if (run) await promptTaskCallback(callbackDeps, run.taskId);
+      })(),
+    );
+  }
   // Every terminal outcome funnels through finalizeRun — completion, failure,
   // the tool-loop stop and pre-turn failures — but only the attempt that still
   // owns the run finalizes it. A fenced-out attempt must not end the run's
@@ -58,14 +76,19 @@ export function createRunExecutor(executorDeps: ExecutorDeps) {
       }
       // A caller waiting on this task hears now rather than at its callback's next check.
       if (result)
-        await bestEffort(
-          "prompt task callback",
-          promptTaskCallback(
-            { ...executorDeps, rootKey: executorDeps.taskCallbackRootKey },
-            input.taskId,
-          ),
-        );
+        await bestEffort("prompt task callback", promptTaskCallback(callbackDeps, input.taskId));
       return result;
+    },
+    pauseRunForInput: async (input) => {
+      const paused = await executorDeps.events.pauseRunForInput(input);
+      if (paused && !paused.existingRequest && !paused.continuationRunId)
+        await promptPausedTaskCallback(input.runId);
+      return paused;
+    },
+    pauseRunForTakeover: async (input) => {
+      const paused = await executorDeps.events.pauseRunForTakeover(input);
+      if (paused === true) await promptPausedTaskCallback(input.runId);
+      return paused;
     },
   };
   const baseDeps: ExecutorDeps = { ...executorDeps, events };
