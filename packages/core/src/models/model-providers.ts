@@ -502,6 +502,44 @@ export function collapseOlderModels<
   });
 }
 
+function isModelIdDigit(code: number): boolean {
+  return code >= 48 && code <= 57;
+}
+
+function isModelIdLetter(code: number): boolean {
+  return code >= 97 && code <= 122;
+}
+
+function modelReleaseParts(name: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  while (start < name.length) {
+    const first = name.charCodeAt(start);
+    let end = start + 1;
+    if (isModelIdDigit(first)) {
+      while (isModelIdDigit(name.charCodeAt(end))) end++;
+      let suffix = end;
+      if (name[suffix] === "." && isModelIdDigit(name.charCodeAt(suffix + 1))) {
+        suffix += 2;
+        while (isModelIdDigit(name.charCodeAt(suffix))) suffix++;
+      }
+      // A decimal stays together only when it describes a size, such as 0.5b.
+      if (isModelIdLetter(name.charCodeAt(suffix))) {
+        end = suffix + 1;
+        while (isModelIdLetter(name.charCodeAt(end)) || isModelIdDigit(name.charCodeAt(end))) end++;
+      }
+    } else if (isModelIdLetter(first)) {
+      while (isModelIdLetter(name.charCodeAt(end))) end++;
+    } else {
+      start = end;
+      continue;
+    }
+    parts.push(name.slice(start, end));
+    start = end;
+  }
+  return parts;
+}
+
 type ModelRelease = { family: string; version: number[]; tagged: boolean; date: number[] };
 
 /**
@@ -519,7 +557,7 @@ function modelRelease(choice: ChatModelChoice): ModelRelease {
   const version: number[] = [];
   const date: number[] = [];
   let tagged = false;
-  const parts = name.match(/\d+(?:\.\d+)?[a-z][a-z\d]*|[a-z]+|\d+/g) ?? [];
+  const parts = modelReleaseParts(name);
   let wordAfterVersion = false;
   for (const [index, part] of parts.entries()) {
     if (!/^\d+$/.test(part)) {
