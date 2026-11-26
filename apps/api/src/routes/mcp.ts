@@ -191,6 +191,7 @@ export function mcpRoutes(ctx: RouterContext) {
         throw new ClientError("CONFLICT", "An MCP server with that name already exists.");
       throw error;
     });
+    if (row.organizationId) void deps.events.publishOrganizationChange?.(row.organizationId);
     return announceMcpServer(row, actor);
   }
 
@@ -431,6 +432,8 @@ export function mcpRoutes(ctx: RouterContext) {
         throw error;
       });
       if (row) {
+        if (row.updated.organizationId)
+          void deps.events.publishOrganizationChange?.(row.updated.organizationId);
         for (const event of row.seqs) await deps.events.notify(event.threadId, event.seq);
         const oauth = await mcpOAuth.summaryFor(row.updated, actor);
         return mcpServerDto(await beginMcpProbe(row.updated, actor, oauth), oauth, viewer);
@@ -664,7 +667,7 @@ export function mcpRoutes(ctx: RouterContext) {
                 await managedOrganizationId(deps.prisma, context.actor),
               ),
             },
-            select: { id: true, secretId: true },
+            select: { id: true, secretId: true, organizationId: true },
           });
           if (!server) throw new IsolationError();
           // Assignments cascade; the encrypted credential must go with the server.
@@ -672,6 +675,8 @@ export function mcpRoutes(ctx: RouterContext) {
           const seqs = await deps.prisma.$transaction((tx) =>
             removeMcpServerInTransaction(tx, context.actor, server),
           );
+          if (server.organizationId)
+            void deps.events.publishOrganizationChange?.(server.organizationId);
           for (const event of seqs) await deps.events.notify(event.threadId, event.seq);
           return { ok: true as const };
         }),
@@ -822,12 +827,14 @@ export function mcpRoutes(ctx: RouterContext) {
             const server = await deps.prisma.mcpServer.findFirst({
               where: { id: serverId, revision, ...mcpServerIn(context.actor) },
             });
-            if (server)
-              await beginMcpProbe(
-                server,
-                context.actor,
-                await mcpOAuth.summaryFor(server, context.actor),
-              );
+            if (!server) return;
+            if (server.organizationId)
+              void deps.events.publishOrganizationChange?.(server.organizationId);
+            await beginMcpProbe(
+              server,
+              context.actor,
+              await mcpOAuth.summaryFor(server, context.actor),
+            );
           })().catch((error) => getLogger().error("mcp server probe after oauth failed", error));
           // A bot removed since the sign-in began has nothing to get. Any other failure fails
           // the call: signing in again finds the server connected and gives it to the bot.
@@ -861,6 +868,8 @@ export function mcpRoutes(ctx: RouterContext) {
               { status: "unknown", message: MCP_OAUTH_PENDING_MESSAGE },
               revision,
             );
+          if (revision !== undefined && server?.organizationId)
+            void deps.events.publishOrganizationChange?.(server.organizationId);
           return { ok: true as const };
         }),
       },
