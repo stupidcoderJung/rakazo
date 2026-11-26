@@ -20,6 +20,7 @@ function setup(
     delivered = {} as { runId?: string; status?: string },
     keyActive = true,
     member = true,
+    questionMessageId = "",
   } = {},
 ) {
   const update = vi.fn(async () => ({ count: 1 }));
@@ -47,14 +48,29 @@ function setup(
         botId: "bot-1",
         createdAt: now,
         updatedAt: now,
-        runs: [{ id: "run-1", status: runStatus, updatedAt: now }],
+        runs: [{ id: "run-1", status: runStatus, createdAt: now, updatedAt: now }],
       })),
     },
-    run: { findFirst: vi.fn(async () => ({ id: "run-1", createdAt: now })) },
     apiKey: { findFirst: vi.fn(async () => (keyActive ? { id: "key-1" } : null)) },
     spaceMember: { findFirst: vi.fn(async () => (member ? { userId: "user-1" } : null)) },
     message: {
-      findMany: vi.fn(async () => [{ id: "m1", blocks: [{ kind: "text", text: "Done" }] }]),
+      findMany: vi.fn(async () =>
+        questionMessageId
+          ? [
+              {
+                id: questionMessageId,
+                blocks: [
+                  {
+                    kind: "tool_question",
+                    status: "pending",
+                    expiresAt: "2999-01-01T00:00:00.000Z",
+                    question: { source: "Calendar", message: "Which calendar?", fields: [] },
+                  },
+                ],
+              },
+            ]
+          : [{ id: "m1", blocks: [{ kind: "text", text: "Done" }] }],
+      ),
     },
   } as unknown as PrismaClient;
   const enqueue = vi.fn(async () => undefined);
@@ -131,6 +147,25 @@ describe("task callbacks", () => {
       id: expect.stringMatching(/^task-1:run-1:needs_input:[0-9a-f]{16}$/),
     });
     expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "task.callback" }));
+  });
+
+  it("delivers separate integration questions with identical text", async () => {
+    const first = setup("running", { questionMessageId: "first-message" });
+    await first.deliver();
+    const firstId = first.requests[0]!.headers.get("x-rakazo-delivery")!;
+    const next = setup("running", {
+      questionMessageId: "next-message",
+      delivered: { runId: "run-1", status: firstId.replace("task-1:run-1:", "") },
+    });
+    await next.deliver();
+    const nextId = next.requests[0]!.headers.get("x-rakazo-delivery")!;
+    expect(nextId).not.toBe(firstId);
+    const retry = setup("running", {
+      questionMessageId: "next-message",
+      delivered: { runId: "run-1", status: nextId.replace("task-1:run-1:", "") },
+    });
+    await retry.deliver();
+    expect(retry.requests).toEqual([]);
   });
 
   it("stops for good once the key is revoked or the person left the Space", async () => {

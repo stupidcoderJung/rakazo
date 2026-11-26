@@ -15,7 +15,7 @@ import { isEgressRefused } from "../network/network-address.js";
 import type { SafeWebFetchOptions } from "../web/web-ssrf.js";
 import { assertSafeWebUrl, fetchSafeHttpRequest } from "../web/web-ssrf.js";
 import { apiKeyStillGrants } from "./api-key-access.js";
-import { readPublicTask } from "./public-task.js";
+import { readPublicTaskSnapshot } from "./public-task.js";
 
 /** While a task works, its callback checks back this often; settling sends it at once. */
 export const TASK_CALLBACK_RECHECK_MS = 5 * 60_000;
@@ -138,21 +138,15 @@ async function deliverLeasedTaskCallback(
   const callback = await deps.prisma.taskCallback.findUnique({ where: { taskId } });
   if (!callback) return;
   const owner = { taskId, userId: callback.userId, spaceId: callback.spaceId };
-  const [task, latestRun] = await Promise.all([
-    readPublicTask(deps.prisma, owner),
-    deps.prisma.run.findFirst({
-      where: { taskId, userId: callback.userId },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { id: true, createdAt: true },
-    }),
-  ]);
+  const snapshot = await readPublicTaskSnapshot(deps.prisma, owner);
   // Output goes only where the person could still read it themselves; otherwise it stops for good.
   const granted = await apiKeyStillGrants(deps.prisma, {
     keyId: callback.issuerKeyId,
     userId: callback.userId,
     spaceId: callback.spaceId,
   });
-  if (!task || !latestRun || !granted) return;
+  if (!snapshot?.latestRun || !granted) return;
+  const { task, latestRun, questionMessageId } = snapshot;
   const recheck = async () => {
     if (now.getTime() - latestRun.createdAt.getTime() < TASK_CALLBACK_GIVE_UP_MS)
       await deps.jobs.enqueue(
@@ -160,12 +154,11 @@ async function deliverLeasedTaskCallback(
       );
   };
   if (!taskSettled(task.status)) return recheck();
-  // A run can ask more than once, so each question is its own state, named by what it asks; an
-  // ended run is one state.
+  // A run may ask the same question twice. Its message identifies the request across retries.
   const state =
     task.status === "needs_input"
       ? `needs_input:${createHash("sha256")
-          .update(task.question ?? "")
+          .update(questionMessageId ?? task.question ?? "")
           .digest("hex")
           .slice(0, 16)}`
       : task.status;
