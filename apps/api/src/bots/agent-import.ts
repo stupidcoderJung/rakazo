@@ -31,6 +31,7 @@ import {
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_INSTRUCTIONS_MAX_LENGTH,
   CreateRoutineInput,
+  GROK_BOT_EXPORT_PATH,
   isValidTimeZone,
   MEMORY_INDEX_PATH,
 } from "@rakazo/contracts";
@@ -402,6 +403,12 @@ export async function createImportedBot<PreparedKey>(
     {
       ...input,
       digest: requestDigest(request),
+      // A batch retry has only the chosen file identity. If it already committed, return that
+      // bot when recovering through review without changing its settings or importing it again.
+      batchReplayDigest:
+        input.files.length === 1 && input.files[0]?.path === GROK_BOT_EXPORT_PATH
+          ? requestDigest({ files: input.files })
+          : undefined,
       build: () => buildPlan(services as AgentImportServices, actor, input),
     },
     signal,
@@ -465,6 +472,8 @@ export type ImportedBotRequest = Pick<
 > & {
   /** Of the request without its key: reusing a key for another request is refused. */
   digest: string;
+  /** Accepts the same file when a batch using this key already committed. */
+  batchReplayDigest?: string;
   build: () => Promise<Built>;
   /** Posted before the checklist, such as cards for apps the bot works with. */
   cards?: MessageBlock[];
@@ -488,7 +497,7 @@ export async function writeImportedBot<PreparedKey>(
       select: { botId: true, requestDigest: true },
     });
     if (!found) return null;
-    if (found.requestDigest !== digest) {
+    if (found.requestDigest !== digest && found.requestDigest !== input.batchReplayDigest) {
       throw refused(
         "PRECONDITION_FAILED",
         "import_reused",

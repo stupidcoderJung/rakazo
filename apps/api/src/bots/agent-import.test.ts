@@ -253,6 +253,36 @@ describe("importing several Grok Bots at once", () => {
     },
   ];
 
+  it("recovers a committed batch bot through a review of the same export", async () => {
+    const files = exported([{ name: "Bramble", memories: ["A"] }]);
+    const createBot = vi.fn();
+    const findBot = vi.fn().mockResolvedValue(bot);
+    const service = services({
+      prisma: {
+        agentImport: {
+          findFirst: vi.fn().mockResolvedValue({
+            botId: bot.id,
+            requestDigest: requestDigest({ files }),
+          }),
+        },
+      } as never,
+      createBot,
+      findBot,
+    });
+    const review = {
+      ...input,
+      importKey: "import-key-1",
+      files,
+      includeSecrets: false,
+    };
+    await expect(createImportedBot(service, actor, review)).resolves.toEqual(bot);
+    expect(findBot).toHaveBeenCalledWith(actor, bot.id);
+    await expect(
+      createImportedBot(service, actor, { ...review, files: exported([{ name: "Wren" }]) }),
+    ).rejects.toMatchObject({ data: { reason: "import_reused" } });
+    expect(createBot).not.toHaveBeenCalled();
+  });
+
   it("creates each with its own name, and one refused leaves the others", async () => {
     const names: string[] = [];
     const results = await createImportedBots(
