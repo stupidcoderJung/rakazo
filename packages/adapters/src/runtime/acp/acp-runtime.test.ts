@@ -124,7 +124,9 @@ afterEach(() => {
 
 describe("acpAgentRuntime", () => {
   it("sends recent and current images without resending the source message", async () => {
-    const runtime = acpAgentRuntime(fallback, descriptor(), { accessCheck: allowed });
+    const runtime = acpAgentRuntime(fallback, descriptor({ acceptsImages: true }), {
+      accessCheck: allowed,
+    });
     const recent = { name: "earlier.png", mimeType: "image/png", data: Uint8Array.of(1) } as const;
     const current = { name: "current.png", mimeType: "image/png", data: Uint8Array.of(2) } as const;
     const { error } = await collect(
@@ -144,8 +146,9 @@ describe("acpAgentRuntime", () => {
       prompt: [
         { type: "text" },
         { type: "image", data: "AQ==", mimeType: "image/png" },
-        { type: "text", text: "hello" },
+        { type: "text", text: expect.stringMatching(/<\/conversation_history>\s+hello$/) },
         { type: "image", data: "Ag==", mimeType: "image/png" },
+        { type: "text" },
       ],
     });
   });

@@ -34,33 +34,43 @@ async function answer(run: () => Promise<Record<string, unknown>>): Promise<Tool
 /** Builds a server for one request: the protocol keeps no session, so any instance answers. */
 function mcpServer(access: BotAccess, caller: KeyCaller, signal: AbortSignal) {
   const server = new McpServer({ name: "rakazo", version: "1.0.0" });
-  const wait = (
-    started: Parameters<BotAccess["waitForTask"]>[1],
+  type StartedTask = Parameters<BotAccess["waitForTask"]>[1];
+  const wait = (started: StartedTask, seconds = DEFAULT_TOOL_WAIT_SECONDS): Promise<PublicTask> =>
+    access.waitForTask(caller, started, seconds * 1000, signal);
+  async function sendAndWait(
+    send: () => Promise<StartedTask>,
     seconds = DEFAULT_TOOL_WAIT_SECONDS,
-  ): Promise<PublicTask> => access.waitForTask(caller, started, seconds * 1000, signal);
+  ): Promise<PublicTask> {
+    const release = seconds > 0 ? access.reserveFollow(caller) : undefined;
+    try {
+      return await access.waitForTask(caller, await send(), seconds * 1000, signal, !!release);
+    } finally {
+      release?.();
+    }
+  }
   server.registerTool("list_bots", BOT_ACCESS_TOOLS.list_bots, () =>
     answer(async () => ({
       bots: (await access.listBots(caller)).map(({ id, name, space }) => ({ id, name, space })),
     })),
   );
   server.registerTool("create_task", BOT_ACCESS_TOOLS.create_task, (input) =>
-    answer(async () => {
-      if (input.wait_seconds !== 0) access.assertCanFollow(caller);
-      const started = await access.createTask(caller, { bot: input.bot, text: input.message });
-      return await wait(started, input.wait_seconds);
-    }),
+    answer(() =>
+      sendAndWait(
+        () => access.createTask(caller, { bot: input.bot, text: input.message }),
+        input.wait_seconds,
+      ),
+    ),
   );
   server.registerTool("get_task", BOT_ACCESS_TOOLS.get_task, (input) =>
     answer(async () => await wait(await access.getTask(caller, input.task_id), input.wait_seconds)),
   );
   server.registerTool("send_task_message", BOT_ACCESS_TOOLS.send_task_message, (input) =>
-    answer(async () => {
-      if (input.wait_seconds !== 0) access.assertCanFollow(caller);
-      return wait(
-        await access.sendToTask(caller, input.task_id, input.message),
+    answer(() =>
+      sendAndWait(
+        () => access.sendToTask(caller, input.task_id, input.message),
         input.wait_seconds,
-      );
-    }),
+      ),
+    ),
   );
   return server;
 }
