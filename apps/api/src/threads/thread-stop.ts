@@ -1,6 +1,7 @@
-import type { SandboxProvider } from "@rakazo/adapter-kit";
+import type { JobPublisher, SandboxProvider } from "@rakazo/adapter-kit";
 import {
   cancelComputerRunWork,
+  promptTaskCallback,
   returnHelperOutcome,
   screenLeaseIdForRun,
   toComputerRef,
@@ -18,10 +19,11 @@ import {
   conversationRunsWhere,
   createThreadMessageInTransaction,
   expireComputerExecutionLeases,
+  runAsTenant,
   THREAD_LOCK_TRANSACTION_OPTIONS,
   transientRunEventsWhere,
 } from "@rakazo/db";
-import { getLogger } from "@rakazo/logging";
+import { bestEffort, getLogger } from "@rakazo/logging";
 import type { ThreadTarget } from "./thread-target.js";
 
 /** A bare "stop" or "stop now" with nothing attached: the owner's Stop, sent as text. */
@@ -35,12 +37,16 @@ export function stoppedRoutineNote(routineName: string) {
   return `Stopped the routine "${routineName}".`;
 }
 
+type ThreadStopDeps = {
+  prisma: PrismaClient;
+  sandbox: SandboxProvider;
+  events: Pick<ThreadEvents, "notify" | "publishSpaceChange">;
+  jobs?: Pick<JobPublisher, "enqueue">;
+  taskCallbackRootKey?: string;
+};
+
 export async function stopThreadRuns(
-  deps: {
-    prisma: PrismaClient;
-    sandbox: SandboxProvider;
-    events: ThreadEvents;
-  },
+  deps: ThreadStopDeps,
   actor: Actor,
   target: ThreadTarget,
   /** Stop only the background helper behind this card in the chat. */
@@ -84,6 +90,7 @@ export function cancelThreadRuns(
       data: { status: "cancelled", completedAt: new Date() },
       select: {
         id: true,
+        taskId: true,
         botId: true,
         userId: true,
         spaceId: true,
@@ -186,6 +193,11 @@ export function cancelThreadRuns(
       computers,
       leases,
       eventSeq,
+      cancelledTasks: [
+        ...new Map(
+          cancelled.map(({ taskId, spaceId, userId }) => [taskId, { taskId, spaceId, userId }]),
+        ).values(),
+      ],
       stoppedHelpers: cancelled.filter((run) => run.trigger === BACKGROUND_HELPER_TRIGGER),
     };
   };
@@ -193,11 +205,7 @@ export function cancelThreadRuns(
 
 /** Stop's after-commit half: wakes subscribers, settles stopped helpers' cards, and tears down the cancelled runs' computer work. */
 export async function finishThreadStop(
-  deps: {
-    prisma: PrismaClient;
-    sandbox: SandboxProvider;
-    events: Pick<ThreadEvents, "notify" | "publishSpaceChange">;
-  },
+  deps: ThreadStopDeps,
   actor: Pick<Actor, "spaceId" | "userId">,
   target: { threadId: string },
   {
@@ -205,9 +213,22 @@ export async function finishThreadStop(
     computers,
     leases,
     eventSeq,
+    cancelledTasks,
     stoppedHelpers,
   }: Awaited<ReturnType<ReturnType<typeof cancelThreadRuns>>>,
 ) {
+  const { jobs, taskCallbackRootKey: rootKey } = deps;
+  if (jobs && rootKey)
+    await Promise.all(
+      cancelledTasks.map((task) =>
+        bestEffort(
+          "prompt cancelled task callback",
+          runAsTenant(task, () =>
+            promptTaskCallback({ prisma: deps.prisma, jobs, rootKey }, task.taskId),
+          ),
+        ),
+      ),
+    );
   if (eventSeq !== null) {
     // The events are durable; subscribers refetch from their persisted cursor.
     await deps.events.notify(target.threadId, eventSeq);

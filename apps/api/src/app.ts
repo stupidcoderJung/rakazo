@@ -64,6 +64,7 @@ import {
   StripeBillingProvider,
   startServerFoundation,
   stripeBillingConfigFromEnv,
+  taskCallbackRootKey,
   UserDeviceHub,
   UserDevices,
   userDeviceForwardSecret,
@@ -669,6 +670,7 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     });
 
   const router = createRouter({
+    taskCallbackRootKey: taskCallbackRootKey(env.encryptionKey),
     // Only computers people paired: nothing clears a routine's "Use my computer" when this
     // server's own screen is turned off and on again.
     userDevices: userDevicesOverride ?? userDevices,

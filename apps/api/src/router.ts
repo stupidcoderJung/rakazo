@@ -100,6 +100,7 @@ export interface RouterDeps {
   ticketChanges: TicketChangeNotifier;
   auth: Auth;
   jobs: JobPublisher;
+  taskCallbackRootKey?: string;
   pageRevisions?: Pick<ReturnType<typeof createPageRevisions>, "start" | "recipient">;
   sandbox: SandboxProvider;
   memory: MemoryStore;

@@ -8,7 +8,11 @@ import type {
   SecretStore,
 } from "@rakazo/adapter-kit";
 import type { MessagingDelivery, MessagingInstallations, TeamChat } from "@rakazo/adapters";
-import { applyMessagingOutboundStatus, createMessagingTeamChatHistory } from "@rakazo/adapters";
+import {
+  applyMessagingOutboundStatus,
+  createMessagingTeamChatHistory,
+  taskCallbackRootKey,
+} from "@rakazo/adapters";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { provisionMessagingIdentity, runAsSystem } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -68,6 +72,7 @@ export async function startMessagingRuntime({
     maxUploadSizeBytes: env.maxUploadSizeBytes,
   });
   const inboundDeps = {
+    taskCallbackRootKey: taskCallbackRootKey(env.encryptionKey),
     prisma,
     events,
     jobs,
