@@ -44,7 +44,7 @@ const RESULT_LIMIT = 12_000;
 // Stop only settles a card, so it brings no job queue.
 type HelperDeps = Pick<ExecutorDeps, "prisma"> & {
   events: Pick<ExecutorDeps["events"], "notify">;
-  jobs?: ExecutorDeps["jobs"];
+  jobs?: Pick<ExecutorDeps["jobs"], "enqueue">;
 };
 type HelperBlock = Extract<MessageBlock, { kind: "subagent" }>;
 

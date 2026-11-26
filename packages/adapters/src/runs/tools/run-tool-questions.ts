@@ -5,6 +5,7 @@ import { deadlineSignal, displayName } from "@rakazo/core";
 import { createSealedBoxKey } from "@rakazo/core/node/sealed-box";
 import { takeToolQuestionAnswer } from "@rakazo/db";
 import { bestEffort, getLogger } from "@rakazo/logging";
+import { promptTaskCallback } from "../../tasks/task-callbacks.js";
 import type { RunContext } from "../assembly/run-context.js";
 import { publishMessage } from "../assembly/run-messages.js";
 import { notifyRun } from "../lifecycle/run-notifications.js";
@@ -56,6 +57,13 @@ async function askInRun(
     { kind: "tool_question", question, status: "pending", expiresAt, publicKey: key.publicKey },
   ]);
   if (!message) return { action: "decline" };
+  await bestEffort(
+    "prompt task callback",
+    promptTaskCallback(
+      { prisma: deps.prisma, jobs: deps.jobs, rootKey: deps.taskCallbackRootKey },
+      run.taskId,
+    ),
+  );
   // As for any question the run asks: the person may be elsewhere. Only the integration's name is
   // sent, never the server's own text.
   await bestEffort(

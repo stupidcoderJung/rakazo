@@ -4,6 +4,7 @@ import { callClientNonce } from "@rakazo/core";
 import type * as MessageQuoteModule from "@rakazo/core/message-quote";
 import { flush } from "@rakazo/core/test-async";
 import type { PrismaClient } from "@rakazo/db";
+import { currentDbContext } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { reactToThreadMessage } from "./thread-reactions.js";
 import { threadSnapshot } from "./thread-snapshot.js";
@@ -701,7 +702,10 @@ describe("threadSnapshot", () => {
       spaceMember: { count: vi.fn().mockResolvedValue(1) },
       $executeRaw: vi.fn(async () => 0),
       $queryRaw: vi.fn().mockResolvedValue([]),
-      message: { findMany: vi.fn().mockResolvedValue([]) },
+      message: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
       event: { findFirst: vi.fn().mockResolvedValue({ seq: 8 }), findMany: findManyEvents },
       run: { findFirst: botRunFindFirst(runs), findMany: groupRunFindMany({ active: runs }) },
     };
@@ -927,7 +931,10 @@ describe("threadSnapshot", () => {
               spaceMember: { count: vi.fn().mockResolvedValue(1) },
               $executeRaw: vi.fn(async () => 0),
               $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
-              message: { findMany: vi.fn().mockResolvedValue([]) },
+              message: {
+                findFirst: vi.fn().mockResolvedValue(null),
+                findMany: vi.fn().mockResolvedValue([]),
+              },
               event: {
                 findFirst: vi.fn().mockResolvedValue(null),
                 findMany: vi.fn().mockResolvedValue([]),
@@ -976,7 +983,10 @@ describe("threadSnapshot", () => {
                 spaceMember: { count: vi.fn().mockResolvedValue(1) },
                 $executeRaw: vi.fn(async () => 0),
                 $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
-                message: { findMany: vi.fn().mockResolvedValue([]) },
+                message: {
+                  findFirst: vi.fn().mockResolvedValue(null),
+                  findMany: vi.fn().mockResolvedValue([]),
+                },
                 event: {
                   findFirst: vi.fn().mockResolvedValue(null),
                   findMany: vi.fn().mockResolvedValue([]),
@@ -1651,7 +1661,10 @@ function groupPrisma(findManyRuns: ReturnType<typeof groupRunFindMany>) {
     spaceMember: { count: vi.fn().mockResolvedValue(1) },
     $executeRaw: vi.fn(async () => 0),
     $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
-    message: { findMany: vi.fn().mockResolvedValue([]) },
+    message: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     event: {
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
@@ -4702,12 +4715,14 @@ describe("sendThreadMessage", () => {
 });
 
 describe("stopThreadRuns", () => {
-  it("snapshots every lease when group members share a team computer", async () => {
+  it("keeps each lease and prompts cancelled tasks in their owners’ scopes", async () => {
     const releaseScreen = vi.fn().mockResolvedValue(undefined);
     const execute = vi.fn(async function* () {
       yield { type: "exit", code: 0 };
     });
     let nextEventSeq = 0;
+    const scopes: Array<ReturnType<typeof currentDbContext>> = [];
+    const enqueue = vi.fn().mockResolvedValue(undefined);
     const transaction = {
       externalEffect: { deleteMany: vi.fn(async () => ({ count: 0 })) },
       user: { findMany: vi.fn().mockResolvedValue([]) },
@@ -4721,8 +4736,22 @@ describe("stopThreadRuns", () => {
       run: {
         findMany: vi.fn().mockResolvedValue([]),
         updateManyAndReturn: vi.fn().mockResolvedValue([
-          { id: "run-a", botId: "bot-a", threadId: "thread-1" },
-          { id: "run-b", botId: "bot-b", threadId: "thread-1" },
+          {
+            id: "run-a",
+            botId: "bot-a",
+            threadId: "thread-1",
+            taskId: "task-a",
+            userId: "owner-a",
+            spaceId: "workspace-1",
+          },
+          {
+            id: "run-b",
+            botId: "bot-b",
+            threadId: "thread-1",
+            taskId: "task-b",
+            userId: "owner-b",
+            spaceId: "workspace-1",
+          },
         ]),
         findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }),
       },
@@ -4757,6 +4786,13 @@ describe("stopThreadRuns", () => {
         callback(transaction),
       ),
       // Simulate workers clearing leases as soon as the transaction commits.
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      taskCallback: {
+        findUnique: vi.fn(async () => {
+          scopes.push(currentDbContext());
+          return { id: "callback" };
+        }),
+      },
       // A post-commit lookup would now miss both sandboxes.
       computer: { findMany: vi.fn().mockResolvedValue([]) },
       computerExecutionLease: {
@@ -4780,12 +4816,22 @@ describe("stopThreadRuns", () => {
       {
         prisma,
         sandbox: { releaseScreen, execute } as unknown as SandboxProvider,
+        jobs: { enqueue },
+        taskCallbackRootKey: "test-key",
         events: { notify: vi.fn().mockResolvedValue(undefined) } as never,
       },
       actor,
       target,
     );
 
+    expect(scopes).toEqual([
+      { kind: "tenant", spaceId: "workspace-1", userId: "owner-a" },
+      { kind: "tenant", spaceId: "workspace-1", userId: "owner-b" },
+    ]);
+    for (const taskId of ["task-a", "task-b"])
+      expect(enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "task.callback", payload: { taskId } }),
+      );
     expect(transaction.computerExecutionLease.findMany).toHaveBeenCalledWith({
       where: { runId: { in: ["run-a", "run-b"] } },
       select: { computerId: true, botId: true, runId: true, fence: true },
@@ -5108,7 +5154,10 @@ describe("helper snapshot settlement", () => {
         spaceMember: { count: vi.fn().mockResolvedValue(1) },
         $executeRaw: vi.fn(async () => 0),
         $queryRaw: vi.fn().mockResolvedValue([]),
-        message: { findMany: vi.fn().mockResolvedValue([]) },
+        message: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          findMany: vi.fn().mockResolvedValue([]),
+        },
         event: {
           findFirst: vi.fn().mockResolvedValue({ seq: 2 }),
           findMany: vi.fn(async (input: { where: { type: { in: string[] } } }) =>

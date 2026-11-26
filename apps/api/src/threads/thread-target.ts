@@ -488,6 +488,7 @@ export async function sendThreadMessage(
     prisma: PrismaClient;
     events: ThreadEvents;
     jobs: JobPublisher;
+    taskCallbackRootKey?: string;
     imageAdmission?: Parameters<typeof assertThreadImageInput>[5];
     maxAttachmentsPerMessage?: number;
     analytics?: ProductAnalytics;

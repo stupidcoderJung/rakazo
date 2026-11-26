@@ -18,8 +18,8 @@ import { isTerminatingReplyResult, terminatingReplyText } from "../../approvals/
 import { cliEnv, privateFolder } from "../../cli-models/cli-process.js";
 import type { PersonalCliAccessCheck } from "../../cli-models/personal-access.js";
 import { deliverFinishedShells } from "../../computers/sandbox/shell-command-stream.js";
+import { agentCliModelSeesImages } from "../../models/model-vision.js";
 import { sanitizeSensitiveText } from "../pi/pi-runtime-errors.js";
-import { toPiImages } from "../pi/pi-runtime-history.js";
 import { modelStreamIdleTimeoutMs } from "../pi/pi-runtime-limits.js";
 import { createRuntimeModels } from "../pi/pi-runtime-models.js";
 import { COMPUTER_MODE_TOOLS } from "../pi/tools/pi-runtime-computer-mode.js";
@@ -46,23 +46,18 @@ import {
   sessionKey,
   takeReplyElsewhere,
 } from "./acp-sessions.js";
-import {
-  conversationBlock,
-  historyLine,
-  OWN_SPEAKER,
-  PERSON_SPEAKER,
-  unknownToolText,
-} from "./acp-turn.prompt.js";
+import { contentHash, turnText } from "./acp-turn.js";
+import { unknownToolText } from "./acp-turn.prompt.js";
 
 /** The MCP server name the CLI sees Rakazo's tools under. */
 export const ACP_TOOL_SERVER = "rakazo";
 
-/** Screen work needs computer mode, which a CLI-run bot does not have yet. */
-const UNSUPPORTED_TOOLS = new Set([
-  ...COMPUTER_MODE_TOOLS,
-  "enter_computer_mode",
-  "leave_computer_mode",
-]);
+/**
+ * A CLI-run bot has one model, the CLI's, so there is no separate computer mode to switch into:
+ * a CLI that passes images on gets the screen tools directly, and one that does not gets none.
+ */
+const MODE_SWITCH_TOOLS = new Set(["enter_computer_mode", "leave_computer_mode"]);
+const SCREEN_TOOLS = new Set([...COMPUTER_MODE_TOOLS, ...MODE_SWITCH_TOOLS]);
 
 /** The Agent Client Protocol's error code for a request that needs the agent signed in. */
 const AUTH_REQUIRED = -32000;
@@ -72,8 +67,6 @@ const INVALID_PARAMS = -32602;
 const PROTOCOL_VERSION = 1;
 /** How many of its own replies a session remembers, to tell them from replies written elsewhere. */
 const MAX_REMEMBERED_REPLIES = 200;
-/** How much of the chat a new session is given, newest first, in characters. */
-const SEED_CHARS = 32_000;
 /** How long a turn that ends early waits for the CLI to settle its cancelled prompt. */
 const CANCEL_GRACE_MS = 3_000;
 
@@ -82,7 +75,6 @@ const agentFolder = privateFolder("rakazo-agent-cli", false);
 let toolHostModels: Models | undefined;
 
 type Update = Record<string, unknown>;
-type PromptBlock = { type: "text"; text: string } | ReturnType<typeof toPiImages>[number];
 
 interface AcpAgentRuntimeOptions {
   accessCheck?: PersonalCliAccessCheck;
@@ -234,10 +226,15 @@ async function runAcpTurn(
   const includeOwnReplies = ownsChatSession && takeReplyElsewhere(key);
   const disposable = !ownsChatSession;
   const known = ownsChatSession ? findSession(key) : undefined;
+  // The model the CLI runs must see images too: a separate computer-use model, which a run may also
+  // have, is not one this runtime switches to.
+  const seesImages = agentCliModelSeesImages(descriptor, request.model.id);
   try {
     const host = toolHost(request, context, signal, push, cancelTurn, toolBudget);
     const agentTools = toAgentTools(
-      request.tools.filter((tool) => !UNSUPPORTED_TOOLS.has(tool.name)),
+      request.tools.filter(
+        (tool) => !(seesImages ? MODE_SWITCH_TOOLS : SCREEN_TOOLS).has(tool.name),
+      ),
       host,
     );
     const byName = new Map(agentTools.map((tool) => [tool.name, tool]));
@@ -475,14 +472,18 @@ async function runAcpTurn(
       id: activeSessionId,
       cwd,
       seen: new Set(),
+      imaged: new Map(),
       context: new Set(),
       replies: new Set(),
       usedAt: Date.now(),
     };
-    const prompt = turnPrompt(request, current, fresh, includeOwnReplies);
-    const promptCapabilities = (capabilities.promptCapabilities ?? {}) as Update;
-    if (prompt.some((block) => block.type === "image") && promptCapabilities.image !== true) {
-      throw new Error(`${descriptor.label} does not accept image attachments.`);
+    const takesImages = Boolean((capabilities.promptCapabilities as Update | undefined)?.image);
+    const turn = turnText(request, current, fresh, includeOwnReplies, seesImages && takesImages);
+    if (turn.leftOut) {
+      getLogger().warn("The agent CLI does not take images; the message's images were left out", {
+        agent: descriptor.id,
+        images: turn.leftOut,
+      });
     }
     current.usedAt = Date.now();
     if (ownsChatSession) {
@@ -490,7 +491,7 @@ async function runAcpTurn(
       cachedSession = true;
     }
 
-    const send = async (content: PromptBlock[]) => {
+    const send = async (content: Update[]) => {
       const prompting = agent
         .request<Update>("session/prompt", { sessionId: activeSessionId, prompt: content })
         .catch((error: unknown) => {
@@ -509,7 +510,7 @@ async function runAcpTurn(
         throw error;
       }
     };
-    let response = await send(prompt);
+    let response = await send(turn.blocks);
     // Shell commands still running when the CLI ended its turn report back, as between steps.
     while (!violation && !cancelled && host.pendingShells.length) {
       let finished: string | undefined;
@@ -745,84 +746,6 @@ function flattenValues(options: unknown): string[] {
   );
 }
 
-/**
- * This turn's message: the chat the session has not seen, then the new message. A new session
- * gets the newest part of the chat that fits; a continued one only what others wrote since.
- */
-function turnPrompt(
-  request: AgentRunRequest,
-  session: AgentSession,
-  fresh: boolean,
-  includeOwn: boolean,
-): PromptBlock[] {
-  const lines: Array<{ text: string; images: AgentRunRequest["currentTurnImages"] }> = [];
-  for (const item of request.history) {
-    const content = item.content.trim();
-    // The new message itself goes last, as the prompt.
-    if ((!content && !item.images?.length) || (item.id && item.id === request.sourceMessageId))
-      continue;
-    const own = item.role === "assistant" && !item.speaker;
-    if (item.id) {
-      if (session.seen.has(item.id)) continue;
-      session.seen.add(item.id);
-      // The session wrote this reply itself, unless a turn running beside it did.
-      if (own && !fresh && (!includeOwn || session.replies.has(contentHash(content)))) continue;
-    } else {
-      const hash = contentHash(content);
-      if (session.context.has(hash)) continue;
-      session.context.add(hash);
-    }
-    const speaker =
-      item.speaker ?? (own ? OWN_SPEAKER : item.role === "system" ? "Note" : PERSON_SPEAKER);
-    lines.push({ text: historyLine(speaker, content), images: item.images });
-  }
-  if (request.sourceMessageId) session.seen.add(request.sourceMessageId);
-  // As with ids: only summaries and recall still in this turn's history can come up again.
-  const inContext = new Set(
-    request.history.filter((item) => !item.id).map((item) => contentHash(item.content.trim())),
-  );
-  for (const hash of session.context) if (!inContext.has(hash)) session.context.delete(hash);
-  // Only ids still in the chat's history window can come up again, so the rest are let go.
-  const inWindow = new Set(request.history.map((item) => item.id).filter(Boolean));
-  for (const id of session.seen) {
-    if (!inWindow.has(id) && id !== request.sourceMessageId) session.seen.delete(id);
-  }
-  let kept = lines;
-  if (fresh) {
-    // The newest messages that fit; the newest one is kept, shortened, even when it alone does not.
-    let size = 0;
-    const start = lines.findLastIndex((line) => {
-      size += line.text.length;
-      return size > SEED_CHARS;
-    });
-    kept =
-      start >= 0 && start === lines.length - 1
-        ? [{ ...lines[start]!, text: `…${lines[start]!.text.slice(-SEED_CHARS)}` }]
-        : lines.slice(start + 1);
-  }
-  const message = request.promptSpeaker
-    ? historyLine(request.promptSpeaker, request.prompt)
-    : request.prompt;
-  const history = conversationBlock(
-    kept.map((line) => line.text),
-    fresh,
-  );
-  const historyImages = kept.flatMap((line) => toPiImages(line.images));
-  const currentImages = toPiImages(request.currentTurnImages);
-  if (!historyImages.length) {
-    return [
-      { type: "text", text: [history, message].filter(Boolean).join("\n\n") },
-      ...currentImages,
-    ];
-  }
-  return [
-    { type: "text", text: history },
-    ...historyImages,
-    { type: "text", text: message },
-    ...currentImages,
-  ];
-}
-
 /** Usage is reported only when the CLI gives it; the plan pays, so its cost is unknown. */
 async function reportUsage(
   request: AgentRunRequest,
@@ -933,10 +856,6 @@ function toolResult(result: AgentToolResult<unknown>, finishedShells?: string): 
     content: content.length ? content : [{ type: "text", text: "ok" }],
     ...(details?.error != null || details?.isError === true ? { isError: true } : {}),
   };
-}
-
-function contentHash(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
 }
 
 /**

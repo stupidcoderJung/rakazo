@@ -38,6 +38,7 @@ export interface ExecutorDeps {
   maxAttachmentsPerMessage?: number;
   contextStrategy?: AgentContextStrategy;
   prisma: PrismaClient;
+  taskCallbackRootKey?: string;
   events: ThreadEvents;
   runtime: AgentRuntime;
   sandbox: SandboxProvider;

@@ -88,6 +88,7 @@ export interface MessagingInboundDeps {
    * and told when one settles so the jobs waiting for it are due.
    */
   jobs: Pick<JobPublisher, "enqueue" | "enqueueIn" | "cancelIn"> & JobQueueOrder;
+  taskCallbackRootKey?: string;
   /** Records the replies this line sends, and sends them straight away. */
   delivery: Pick<MessagingDelivery, "recordIn" | "send">;
   sandbox: SandboxProvider;

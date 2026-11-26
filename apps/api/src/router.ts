@@ -42,6 +42,8 @@ import type { Auth } from "@rakazo/auth";
 import type { LabFeature, ModelCredential, NavLink } from "@rakazo/contracts";
 import type { BoardEvents, PrismaClient, ThreadEvents } from "@rakazo/db";
 import type { BillingService } from "./billing/billing.js";
+import type { CreditCode } from "./billing/credit-codes.js";
+import { apiKeysRoutes } from "./bot-access/api-key-routes.js";
 import type { VoiceDeps } from "./calls/voice.js";
 import type { AppEnv } from "./env.js";
 import { meetingCalendarRoutes } from "./meetings/calendar/calendar-routes.js";
@@ -98,6 +100,7 @@ export interface RouterDeps {
   ticketChanges: TicketChangeNotifier;
   auth: Auth;
   jobs: JobPublisher;
+  taskCallbackRootKey?: string;
   pageRevisions?: Pick<ReturnType<typeof createPageRevisions>, "start" | "recipient">;
   sandbox: SandboxProvider;
   memory: MemoryStore;
@@ -155,6 +158,7 @@ export interface RouterDeps {
     publishedInboundOrigin?: string;
     navLinks?: NavLink[];
     adminEmails?: string[];
+    creditCodes?: Map<string, CreditCode>;
     /** Labs features this deployment turns on for every account. */
     deploymentLabs?: LabFeature[];
     phoneCallsEnabled?: boolean;
@@ -191,6 +195,7 @@ export function createRouter(deps: RouterDeps) {
 
   return os.router({
     ...accountRoutes(ctx),
+    ...apiKeysRoutes(ctx),
     ...meetingRoutes(ctx),
     ...meetingCalendarRoutes(ctx),
     ...spacesRoutes(ctx),
@@ -227,6 +232,7 @@ export function routerEnv(env: AppEnv): RouterDeps["env"] {
     phoneCallRingSeconds: env.phoneCallRingSeconds,
     navLinks: env.navLinks,
     adminEmails: env.adminEmails,
+    creditCodes: env.creditCodes,
     maxUploadSizeBytes: env.maxUploadSizeBytes,
     maxAttachmentsPerMessage: env.maxAttachmentsPerMessage,
     agentRuntime: env.agentRuntime,

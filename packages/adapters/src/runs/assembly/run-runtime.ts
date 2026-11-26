@@ -71,6 +71,7 @@ import { localModelsApiKey } from "../../runtime/pi/models/pi-local-provider-id.
 import type { SecretCleanupDeps } from "../../secrets/secret-cleanup.js";
 import { webOriginFromEnv } from "../../server/server-foundation.js";
 import { workspaceSaveLimits } from "../../storage/workspace-save-policy.js";
+import { taskCallbackRootKey } from "../../tasks/task-callbacks.js";
 import { createWebProvider } from "../../web/web-provider-factory.js";
 import { auditLogConfig, createAuditLogReconciler } from "../../webhooks/audit-forwarding.js";
 import { createRunExecutor } from "../executor/executor.js";
@@ -307,8 +308,10 @@ export function createRunRuntime(
         }),
       })
     : undefined;
+  const callbackRootKey = taskCallbackRootKey(env.encryptionKey);
   const executor = createRunExecutor({
     ...executorDeps,
+    taskCallbackRootKey: callbackRootKey,
     runtime,
     maxUploadSizeBytes: env.maxUploadSizeBytes,
     maxAttachmentsPerMessage: env.maxAttachmentsPerMessage,
@@ -380,6 +383,7 @@ export function createRunRuntime(
     lifecycleEmail,
     meetingWork,
     meetingCalendarSync,
+    taskCallbackRootKey: callbackRootKey,
   });
   return { runtime, executor, jobHandlers, messagingDelivery, teamChat, pageRevisions };
 }

@@ -132,16 +132,18 @@ describe("leaving an organization", () => {
 });
 
 describe("an organization signal", () => {
-  it("refreshes organization lists and billing status", async () => {
+  it("refreshes organization lists, billing status and shared MCP servers", async () => {
     const list = organizationsQuery("user-1").queryKey;
     const members = organizationMembersQuery("user-1", "org-work").queryKey;
     const other = spaceQueries("user-1", "home").key();
     const billing = spaceQueries("user-1", "home").billing.status.queryKey();
-    for (const key of [list, members, billing, other]) queryClient.setQueryData(key, {});
+    const mcp = spaceQueries("user-1", "home").mcp.servers.list.queryKey();
+    for (const key of [list, members, billing, mcp, other]) queryClient.setQueryData(key, {});
     await organizationsChanged();
     expect(queryClient.getQueryState(list)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(members)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(billing)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(mcp)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(other)?.isInvalidated).toBe(false);
   });
 });

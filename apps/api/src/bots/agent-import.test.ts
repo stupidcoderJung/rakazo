@@ -5,6 +5,7 @@ import type { AgentImportServices } from "./agent-import.js";
 import {
   agentImportSetupState,
   createImportedBot,
+  createImportedBots,
   previewAgentImport,
   requestDigest,
 } from "./agent-import.js";
@@ -240,6 +241,72 @@ describe("a Grok Bot's event routines", () => {
       { name: "Pulls", active: false, githubEnabled: true },
       { name: "Support", active: false, messageProvider: "slack" },
       { name: "Mail", active: false, emailSenders: "owner" },
+    ]);
+  });
+});
+
+describe("importing several Grok Bots at once", () => {
+  const exported = (bots: object[]) => [
+    {
+      path: GROK_BOT_EXPORT_PATH,
+      content: JSON.stringify({ format: "grok-bot-export", version: 1, bots }),
+    },
+  ];
+
+  it("recovers a committed batch bot through a review of the same export", async () => {
+    const files = exported([{ name: "Bramble", memories: ["A"] }]);
+    const createBot = vi.fn();
+    const findBot = vi.fn().mockResolvedValue(bot);
+    const service = services({
+      prisma: {
+        agentImport: {
+          findFirst: vi.fn().mockResolvedValue({
+            botId: bot.id,
+            requestDigest: requestDigest({ files }),
+          }),
+        },
+      } as never,
+      createBot,
+      findBot,
+    });
+    const review = {
+      ...input,
+      importKey: "import-key-1",
+      files,
+      includeSecrets: false,
+    };
+    await expect(createImportedBot(service, actor, review)).resolves.toEqual(bot);
+    expect(findBot).toHaveBeenCalledWith(actor, bot.id);
+    await expect(
+      createImportedBot(service, actor, { ...review, files: exported([{ name: "Wren" }]) }),
+    ).rejects.toMatchObject({ data: { reason: "import_reused" } });
+    expect(createBot).not.toHaveBeenCalled();
+  });
+
+  it("creates each with its own name, and one refused leaves the others", async () => {
+    const names: string[] = [];
+    const results = await createImportedBots(
+      services({
+        createBot: async (_actor, request) => {
+          names.push(request.name);
+          await request.seed(fakeDb(), bot.id);
+          return { ...bot, name: request.name };
+        },
+      }),
+      actor,
+      {
+        agents: [
+          { importKey: "import-key-1", files: exported([{ name: "Bramble", memories: ["A"] }]) },
+          { importKey: "import-key-2", files: exported([{ name: "Empty", memories: [] }]) },
+          { importKey: "import-key-3", files: exported([{ name: "Wren", instructions: "Plan." }]) },
+        ],
+      },
+    );
+    expect(names).toEqual(["Bramble", "Wren"]);
+    expect(results.map((result) => ("bot" in result ? result.bot.name : "refused"))).toEqual([
+      "Bramble",
+      "refused",
+      "Wren",
     ]);
   });
 });
