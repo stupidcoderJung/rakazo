@@ -8,8 +8,9 @@ import {
   taskSettled,
 } from "@rakazo/contracts";
 import { ClientError } from "@rakazo/core";
-import type { PrismaClient } from "@rakazo/db";
-import { getLogger } from "@rakazo/logging";
+import type { HeldLease, PrismaClient } from "@rakazo/db";
+import { assertLeaseHeld, LeaseHeldError, withLease } from "@rakazo/db";
+import { bestEffort, getLogger } from "@rakazo/logging";
 import { isEgressRefused } from "../network/network-address.js";
 import type { SafeWebFetchOptions } from "../web/web-ssrf.js";
 import { assertSafeWebUrl, fetchSafeHttpRequest } from "../web/web-ssrf.js";
@@ -21,6 +22,7 @@ export const TASK_CALLBACK_RECHECK_MS = 5 * 60_000;
 /** A run still working a week after it started is not reported. */
 const TASK_CALLBACK_GIVE_UP_MS = 7 * 24 * 60 * 60_000;
 const DELIVERY_TIMEOUT_MS = 15_000;
+const CALLBACK_BACKUP_DELAY_MS = 30_000;
 const CALLBACK_PORTS = [443];
 /** The most output one callback carries, in characters: the newest part, the rest stays on the task. */
 const CALLBACK_OUTPUT_LIMIT = 64 * 1024;
@@ -74,16 +76,34 @@ export function signTaskCallback(secret: string, body: string, timestamp: number
   return `t=${timestamp},v1=${digest}`;
 }
 
+export function taskCallbackBackup(taskId: string) {
+  return taskCallbackJob(taskId, new Date(Date.now() + CALLBACK_BACKUP_DELAY_MS));
+}
+
+/** Start delivery once its backup has committed. Other attempts for this task share the lease. */
+export function startTaskCallback(deps: CallbackDeliveryDeps, taskId: string): void {
+  void bestEffort(
+    "deliver task callback",
+    deliverTaskCallback(deps, taskId).catch((error: unknown) => {
+      if (!(error instanceof LeaseHeldError)) throw error;
+    }),
+  );
+}
+
 /** Brings a task's callback forward once one of its runs ends. */
 export async function promptTaskCallback(
-  deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue"> },
+  deps: Omit<CallbackDeliveryDeps, "rootKey"> & { rootKey?: string },
   taskId: string,
 ): Promise<void> {
+  const { rootKey } = deps;
+  if (!rootKey) return;
   const callback = await deps.prisma.taskCallback.findUnique({
     where: { taskId },
     select: { id: true },
   });
-  if (callback) await deps.jobs.enqueue(taskCallbackJob(taskId, new Date()));
+  if (!callback) return;
+  await deps.jobs.enqueue(taskCallbackBackup(taskId));
+  startTaskCallback({ ...deps, rootKey }, taskId);
 }
 
 /**
@@ -91,16 +111,28 @@ export async function promptTaskCallback(
  * later while it works. The delivery id is the same on every retry, so a receiver can drop a
  * repeat. A failed delivery throws, so the queue retries it with backoff. Runs in the owner's Space.
  */
-export async function deliverTaskCallback(
-  deps: {
-    prisma: PrismaClient;
-    jobs: Pick<JobPublisher, "enqueue">;
-    rootKey: string;
-    /** The safe fetch's own seams, so tests reach no network. */
-    egress?: Pick<SafeWebFetchOptions, "fetch" | "resolveHostname">;
-    now?: () => Date;
-  },
+type CallbackDeliveryDeps = {
+  prisma: PrismaClient;
+  jobs: Pick<JobPublisher, "enqueue">;
+  rootKey: string;
+  /** The safe fetch's own seams, so tests reach no network. */
+  egress?: Pick<SafeWebFetchOptions, "fetch" | "resolveHostname">;
+  now?: () => Date;
+};
+
+export function deliverTaskCallback(deps: CallbackDeliveryDeps, taskId: string): Promise<void> {
+  return withLease(
+    deps.prisma,
+    `task-callback:${taskId}`,
+    { ttlMs: CALLBACK_BACKUP_DELAY_MS },
+    (lease) => deliverLeasedTaskCallback(deps, taskId, lease),
+  );
+}
+
+async function deliverLeasedTaskCallback(
+  deps: CallbackDeliveryDeps,
   taskId: string,
+  lease: HeldLease,
 ): Promise<void> {
   const now = deps.now?.() ?? new Date();
   const callback = await deps.prisma.taskCallback.findUnique({ where: { taskId } });
@@ -143,9 +175,12 @@ export async function deliverTaskCallback(
   if (callback.deliveredRunId !== latestRun.id || callback.deliveredStatus !== state) {
     await post(callback, task, `${taskId}:${latestRun.id}:${state}`);
     // Only the address and key it was sent with are marked; a changed one still gets this state.
-    await deps.prisma.taskCallback.updateMany({
-      where: { id: callback.id, url: callback.url, issuerKeyId: callback.issuerKeyId },
-      data: { deliveredAt: now, deliveredRunId: latestRun.id, deliveredStatus: state },
+    await deps.prisma.$transaction(async (tx) => {
+      await assertLeaseHeld(tx, lease);
+      await tx.taskCallback.updateMany({
+        where: { id: callback.id, url: callback.url, issuerKeyId: callback.issuerKeyId },
+        data: { deliveredAt: now, deliveredRunId: latestRun.id, deliveredStatus: state },
+      });
     });
   }
 
@@ -182,6 +217,7 @@ export async function deliverTaskCallback(
       },
       {
         ...deps.egress,
+        signal: lease.signal,
         timeoutMs: DELIVERY_TIMEOUT_MS,
         maxBytes: 1024,
         allowedPorts: CALLBACK_PORTS,

@@ -308,8 +308,10 @@ export function createRunRuntime(
         }),
       })
     : undefined;
+  const callbackRootKey = taskCallbackRootKey(env.encryptionKey);
   const executor = createRunExecutor({
     ...executorDeps,
+    taskCallbackRootKey: callbackRootKey,
     runtime,
     maxUploadSizeBytes: env.maxUploadSizeBytes,
     maxAttachmentsPerMessage: env.maxAttachmentsPerMessage,
@@ -381,7 +383,7 @@ export function createRunRuntime(
     lifecycleEmail,
     meetingWork,
     meetingCalendarSync,
-    taskCallbackRootKey: taskCallbackRootKey(env.encryptionKey),
+    taskCallbackRootKey: callbackRootKey,
   });
   return { runtime, executor, jobHandlers, messagingDelivery, teamChat, pageRevisions };
 }

@@ -4,7 +4,7 @@ import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import type { BotAccessDeps } from "./bot-access.js";
-import { createBotAccess, presentedApiKey } from "./bot-access.js";
+import { createBotAccess, MAX_OPEN_FOLLOWS_PER_KEY, presentedApiKey } from "./bot-access.js";
 
 type Bot = { id: string; name: string };
 
@@ -57,6 +57,7 @@ function setup(
   const enqueueIn = vi.fn(async () => undefined);
   const enqueue = vi.fn(async () => undefined);
   const prisma = {
+    $queryRaw: async () => [],
     $transaction: async (work: (tx: unknown) => unknown) => work(prisma),
     taskCallback: {
       findUnique: vi.fn(
@@ -239,4 +240,16 @@ describe("bot access", () => {
       kind: "NOT_FOUND",
     });
   });
+});
+
+it("reserves a key's follow capacity before a task is sent", () => {
+  const { access, caller } = setup();
+  const reservations = Array.from({ length: MAX_OPEN_FOLLOWS_PER_KEY }, () =>
+    access.reserveFollow(caller),
+  );
+  expect(() => access.reserveFollow(caller)).toThrow("Too many open streams for this API key");
+  reservations[0]!();
+  access.reserveFollow(caller);
+  reservations[0]!();
+  expect(() => access.reserveFollow(caller)).toThrow("Too many open streams for this API key");
 });

@@ -24,6 +24,8 @@ function setup(
 ) {
   const update = vi.fn(async () => ({ count: 1 }));
   const prisma = {
+    $queryRaw: vi.fn(async () => [{ fence: 1n }]),
+    $transaction: (work: (tx: PrismaClient) => Promise<unknown>) => work(prisma),
     taskCallback: {
       findUnique: vi.fn(async () => ({
         id: "callback-1",

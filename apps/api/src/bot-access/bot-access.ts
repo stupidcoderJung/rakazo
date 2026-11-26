@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { createRouterClient, ORPCError, onError } from "@orpc/server";
 import type { JobPublisher } from "@rakazo/adapter-kit";
-import { taskCallbackJob } from "@rakazo/adapter-kit";
 import {
   apiKeyStillGrants,
   assertCallbackUrl,
   readPublicTask,
+  startTaskCallback,
+  taskCallbackBackup,
   taskCallbackSecret,
 } from "@rakazo/adapters";
 import type { Auth } from "@rakazo/auth";
@@ -93,15 +94,20 @@ export function createBotAccess(deps: BotAccessDeps) {
   const { prisma } = deps;
   // Live follows each key holds in this process; each one listens and rechecks its key.
   const openFollows = new Map<string, number>();
-  /** Checked before a message is sent too, so a refused follow never leaves a turn behind. */
-  const assertCanFollow = (caller: KeyCaller) => {
+  /** Reserve before sending, so a refused follow never leaves a turn behind. */
+  const reserveFollow = (caller: KeyCaller) => {
     if ((openFollows.get(caller.keyId) ?? 0) >= MAX_OPEN_FOLLOWS_PER_KEY)
       throw new ClientError("TOO_MANY_REQUESTS", "Too many open streams for this API key");
-  };
-  const releaseFollow = (keyId: string) => {
-    const open = (openFollows.get(keyId) ?? 1) - 1;
-    if (open > 0) openFollows.set(keyId, open);
-    else openFollows.delete(keyId);
+    const keyId = caller.keyId;
+    openFollows.set(keyId, (openFollows.get(keyId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const open = (openFollows.get(keyId) ?? 1) - 1;
+      if (open > 0) openFollows.set(keyId, open);
+      else openFollows.delete(keyId);
+    };
   };
 
   async function authenticate(headers: Headers): Promise<KeyCaller> {
@@ -266,8 +272,8 @@ export function createBotAccess(deps: BotAccessDeps) {
    * looks at once, since a turn may have ended before the row existed for its end to find.
    */
   async function watchTask(keyId: string, actor: Actor, taskId: string, url: string) {
-    await runAsTenant(actor, () =>
-      prisma.$transaction(async (tx) => {
+    await runAsTenant(actor, async () => {
+      await prisma.$transaction(async (tx) => {
         await tx.taskCallback.upsert({
           where: { taskId },
           create: {
@@ -280,9 +286,10 @@ export function createBotAccess(deps: BotAccessDeps) {
           // A new address or key starts fresh, so its receiver hears the current state too.
           update: { url, issuerKeyId: keyId, deliveredRunId: null, deliveredStatus: null },
         });
-        await deps.jobs.enqueueIn(tx, taskCallbackJob(taskId, new Date()));
-      }),
-    );
+        await deps.jobs.enqueueIn(tx, taskCallbackBackup(taskId));
+      });
+      startTaskCallback({ prisma, jobs: deps.jobs, rootKey: deps.taskCallbackRootKey }, taskId);
+    });
   }
 
   async function createTask(
@@ -325,7 +332,10 @@ export function createBotAccess(deps: BotAccessDeps) {
     );
     if (callback && sent.taskId === taskId) {
       // The same task goes on: its callback checks again now.
-      await deps.jobs.enqueue(taskCallbackJob(taskId, new Date()));
+      await runAsTenant(actor, async () => {
+        await deps.jobs.enqueue(taskCallbackBackup(taskId));
+        startTaskCallback({ prisma, jobs: deps.jobs, rootKey: deps.taskCallbackRootKey }, taskId);
+      });
     } else if (callback && !joined) {
       // A new task, signed as before with the key that asked for the first callback. A task
       // that already reports somewhere keeps its own address.
@@ -352,16 +362,16 @@ export function createBotAccess(deps: BotAccessDeps) {
     caller: KeyCaller,
     start: { task: PublicTask; actor: Actor; cursor: number },
     signal?: AbortSignal,
+    reserved = false,
   ): AsyncGenerator<PublicTask | null> {
     let last = start.task;
     yield last;
     if (taskSettled(last.status)) return;
-    assertCanFollow(caller);
-    openFollows.set(caller.keyId, (openFollows.get(caller.keyId) ?? 0) + 1);
+    const release = reserved ? undefined : reserveFollow(caller);
     const events = await client(caller, start.actor, signal)
       .threads.subscribe({ botId: last.bot_id, cursor: start.cursor })
       .catch((error: unknown) => {
-        releaseFollow(caller.keyId);
+        release?.();
         throw error;
       });
     try {
@@ -383,7 +393,7 @@ export function createBotAccess(deps: BotAccessDeps) {
         if (taskSettled(last.status)) return;
       }
     } finally {
-      releaseFollow(caller.keyId);
+      release?.();
       await events.return?.();
     }
   }
@@ -394,12 +404,13 @@ export function createBotAccess(deps: BotAccessDeps) {
     start: { task: PublicTask; actor: Actor; cursor: number },
     waitMs: number,
     parent?: AbortSignal,
+    reserved = false,
   ): Promise<PublicTask> {
     let last = start.task;
     if (waitMs <= 0 || taskSettled(last.status)) return last;
     const signal = deadlineSignal(waitMs, parent);
     try {
-      for await (const task of followTask(caller, start, signal)) if (task) last = task;
+      for await (const task of followTask(caller, start, signal, reserved)) if (task) last = task;
     } catch (error) {
       if (!signal.aborted) throw error;
     }
@@ -411,7 +422,7 @@ export function createBotAccess(deps: BotAccessDeps) {
   }
 
   return {
-    assertCanFollow,
+    reserveFollow,
     authenticate,
     listBots,
     resolveBot,

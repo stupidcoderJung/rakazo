@@ -153,53 +153,67 @@ export function mountPublicApiRoutes(app: Hono, access: BotAccess) {
     withCaller(access, openAiError, async (c, caller) => {
       const request = await readJson(c, ChatCompletionRequestSchema);
       const text = latestUserText(request.messages);
-      access.assertCanFollow(caller);
-      const started = await access.createTask(caller, { bot: request.model, text });
-      const created = Math.floor(Date.now() / 1000);
-      const headers = { "x-rakazo-task-id": started.task.id };
-      if (!request.stream) {
-        // Past this, the answer so far is returned; the task goes on and the chat shows the rest.
-        const task = await access.waitForTask(
-          caller,
-          started,
-          NON_STREAMING_WAIT_MS,
+      const release = access.reserveFollow(caller);
+      let handedOff = false;
+      try {
+        const started = await access.createTask(caller, { bot: request.model, text });
+        const created = Math.floor(Date.now() / 1000);
+        const headers = { "x-rakazo-task-id": started.task.id };
+        if (!request.stream) {
+          // Past this, the answer so far is returned; the task goes on and the chat shows the rest.
+          const task = await access.waitForTask(
+            caller,
+            started,
+            NON_STREAMING_WAIT_MS,
+            c.req.raw.signal,
+            true,
+          );
+          // A turn that ended badly is an error even when it said something first.
+          if (task.status === "failed" || task.status === "cancelled")
+            return c.json(openAiError(502, task.error ?? "The bot stopped"), 502, headers);
+          return c.json(
+            chatCompletion(task, request.model, created, started.earlierOutput),
+            200,
+            headers,
+          );
+        }
+        const response = eventStream(
           c.req.raw.signal,
-        );
-        // A turn that ended badly is an error even when it said something first.
-        if (task.status === "failed" || task.status === "cancelled")
-          return c.json(openAiError(502, task.error ?? "The bot stopped"), 502, headers);
-        return c.json(
-          chatCompletion(task, request.model, created, started.earlierOutput),
-          200,
+          async (signal, send, ping, done) => {
+            try {
+              send(
+                chatCompletionChunk(started.task, request.model, created, { role: "assistant" }),
+              );
+              let sent = "";
+              let last: PublicTask = started.task;
+              for await (const task of access.followTask(caller, started, signal, true)) {
+                if (!task) {
+                  ping();
+                  continue;
+                }
+                last = task;
+                const answer = taskAnswer(task, started.earlierOutput);
+                const content = unsentText(sent, answer);
+                // Later text is compared with the current answer, whatever was sent before.
+                sent = answer;
+                if (content) send(chatCompletionChunk(task, request.model, created, { content }));
+              }
+              if (last.status === "failed" || last.status === "cancelled")
+                send(openAiError(502, last.error ?? "The bot stopped"));
+              else send(chatCompletionChunk(last, request.model, created, {}, finishReason(last)));
+              done();
+            } finally {
+              release();
+            }
+          },
+          (send, failure) => send(openAiError(failure.status, failure.message)),
           headers,
         );
+        handedOff = true;
+        return response;
+      } finally {
+        if (!handedOff) release();
       }
-      return eventStream(
-        c.req.raw.signal,
-        async (signal, send, ping, done) => {
-          send(chatCompletionChunk(started.task, request.model, created, { role: "assistant" }));
-          let sent = "";
-          let last: PublicTask = started.task;
-          for await (const task of access.followTask(caller, started, signal)) {
-            if (!task) {
-              ping();
-              continue;
-            }
-            last = task;
-            const answer = taskAnswer(task, started.earlierOutput);
-            const content = unsentText(sent, answer);
-            // Later text is compared with the current answer, whatever was sent before.
-            sent = answer;
-            if (content) send(chatCompletionChunk(task, request.model, created, { content }));
-          }
-          if (last.status === "failed" || last.status === "cancelled")
-            send(openAiError(502, last.error ?? "The bot stopped"));
-          else send(chatCompletionChunk(last, request.model, created, {}, finishReason(last)));
-          done();
-        },
-        (send, failure) => send(openAiError(failure.status, failure.message)),
-        headers,
-      );
     }),
   );
 

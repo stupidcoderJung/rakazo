@@ -58,7 +58,13 @@ export function createRunExecutor(executorDeps: ExecutorDeps) {
       }
       // A caller waiting on this task hears now rather than at its callback's next check.
       if (result)
-        await bestEffort("prompt task callback", promptTaskCallback(executorDeps, input.taskId));
+        await bestEffort(
+          "prompt task callback",
+          promptTaskCallback(
+            { ...executorDeps, rootKey: executorDeps.taskCallbackRootKey },
+            input.taskId,
+          ),
+        );
       return result;
     },
   };
